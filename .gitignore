@@ -1,0 +1,14 @@
+build/
+dist/
+*.exe
+*.o
+*.log
+*.tmp
+.claude/
+autoreview-*.json
+autoreview-*.txt
+.vs/
+.vscode/
+artifacts/
+winui/bin/
+winui/obj/

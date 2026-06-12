@@ -1,0 +1,120 @@
+<Window
+    x:Class="FluentAgentBar.TaskbarWidgetWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid
+        x:Name="Shell"
+        Width="304"
+        Height="40"
+        Background="Transparent"
+        ToolTipService.ToolTip="{x:Bind ProfileLabel}">
+        <Border CornerRadius="8" Background="{x:Bind TintBrush}" />
+        <Grid
+            Margin="10,5"
+            ColumnDefinitions="16,52,*"
+            ColumnSpacing="8">
+            <Viewbox
+                Width="16"
+                Height="16"
+                VerticalAlignment="Center">
+                <Path
+                    Data="{x:Bind LogoGeometry}"
+                    Fill="{x:Bind LogoBrush}" />
+            </Viewbox>
+
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center">
+                <TextBlock
+                    FontSize="11"
+                    FontWeight="SemiBold"
+                    TextTrimming="CharacterEllipsis"
+                    Foreground="{x:Bind TextPrimaryBrush}"
+                    Text="{x:Bind ProfileTitle}" />
+                <TextBlock
+                    FontSize="9"
+                    FontWeight="Normal"
+                    Margin="0,-1,0,0"
+                    TextTrimming="CharacterEllipsis"
+                    Foreground="{x:Bind TextSecondaryBrush}"
+                    Text="{x:Bind ProfilePlan}"
+                    Visibility="{x:Bind PlanVisibility}" />
+            </StackPanel>
+
+            <Grid
+                Grid.Column="2"
+                RowDefinitions="*,*"
+                RowSpacing="3">
+                <Grid ColumnDefinitions="22,*,34" ColumnSpacing="8">
+                    <TextBlock
+                        FontSize="11"
+                        VerticalAlignment="Center"
+                        Foreground="{x:Bind TextSecondaryBrush}"
+                        Text="{x:Bind PrimaryQuotaLabel}" />
+                    <Grid
+                        Grid.Column="1"
+                        Height="5"
+                        VerticalAlignment="Center">
+                        <Border
+                            Background="{x:Bind TrackBrush}"
+                            CornerRadius="2.5" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{x:Bind PrimaryFillWidth}" />
+                                <ColumnDefinition Width="{x:Bind PrimaryRestWidth}" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Background="{x:Bind PrimaryFillBrush}"
+                                CornerRadius="2.5" />
+                        </Grid>
+                    </Grid>
+                    <TextBlock
+                        Grid.Column="2"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        VerticalAlignment="Center"
+                        TextAlignment="Right"
+                        Foreground="{x:Bind TextPrimaryBrush}"
+                        Text="{x:Bind RemainingText}" />
+                </Grid>
+
+                <Grid
+                    Grid.Row="1"
+                    ColumnDefinitions="22,*,34"
+                    ColumnSpacing="8">
+                    <TextBlock
+                        FontSize="11"
+                        VerticalAlignment="Center"
+                        Foreground="{x:Bind TextSecondaryBrush}"
+                        Text="{x:Bind WeeklyQuotaLabel}" />
+                    <Grid
+                        Grid.Column="1"
+                        Height="5"
+                        VerticalAlignment="Center">
+                        <Border
+                            Background="{x:Bind TrackBrush}"
+                            CornerRadius="2.5" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{x:Bind WeeklyFillWidth}" />
+                                <ColumnDefinition Width="{x:Bind WeeklyRestWidth}" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Background="{x:Bind WeeklyFillBrush}"
+                                CornerRadius="2.5" />
+                        </Grid>
+                    </Grid>
+                    <TextBlock
+                        Grid.Column="2"
+                        FontSize="11"
+                        FontWeight="SemiBold"
+                        VerticalAlignment="Center"
+                        TextAlignment="Right"
+                        Foreground="{x:Bind TextPrimaryBrush}"
+                        Text="{x:Bind WeeklyText}" />
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

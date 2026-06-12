@@ -1,0 +1,24 @@
+{
+  "refreshIntervalSeconds": 300,
+  "flyoutStyle": "acrylic",
+  "profiles": [
+    {
+      "provider": "codex",
+      "label": "Main",
+      "home": "%APPDATA%\\Fluent AgentBar\\profiles\\main",
+      "enabled": true
+    },
+    {
+      "provider": "codex",
+      "label": "Second account",
+      "home": "%APPDATA%\\Fluent AgentBar\\profiles\\second-account",
+      "enabled": true
+    },
+    {
+      "provider": "claude",
+      "label": "Personal",
+      "home": "%USERPROFILE%\\.claude",
+      "enabled": true
+    }
+  ]
+}
