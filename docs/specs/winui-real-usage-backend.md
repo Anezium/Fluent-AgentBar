@@ -1,20 +1,23 @@
-# Spec: real Codex usage data in the WinUI app + Settings NumberBox bug
+# Historical Spec: real Codex usage data in the WinUI app + Settings NumberBox bug
 
-Repo: `e:\Tools\Codex-SWBar-Windows`, project `winui\CodexSwbarWinUI.csproj` (WinUI 3, net8.0-windows10.0.19041.0, x64).
-Build check: `dotnet build winui/CodexSwbarWinUI.csproj -c Debug -p:Platform=x64` → must end 0 errors / 0 warnings.
+Legacy reference only. This spec records a past implementation task and may not
+match the current WinUI code exactly.
+
+Repo: `e:\Tools\Fluent-AgentBar`, project `winui\FluentAgentBar.csproj` (WinUI 3, net8.0-windows10.0.19041.0, x64).
+Build check: `dotnet build winui/FluentAgentBar.csproj -c Debug -p:Platform=x64` → must end 0 errors / 0 warnings.
 Do not commit.
 
 ## Task A — Replace mock usage with real Codex usage (the main job)
 
 Today the WinUI app shows hardcoded numbers from `winui/MockUsageData.cs` (72/54/43/61/88/76) — the user sees "wrong usages" because nothing is real.
 
-The **native C++ app** (`src/main.cpp`) already implements the real pipeline: it spawns `codex app-server` per profile (with that profile's `CODEX_HOME` env var), speaks JSON-RPC over stdio, and reads account + rate-limit data. **Read `src/main.cpp` first** (search for `app-server`, `rate`, `limit`, `quota`, `JSON`) and `PORTING.md` to understand the exact RPC method names, request/response shapes, and how percent values are interpreted there. Port that logic to C#, do not invent a different protocol.
+At the time this was written, the historical native C++ app implemented the real pipeline: it spawned `codex app-server` per profile (with that profile's `CODEX_HOME` env var), spoke JSON-RPC over stdio, and read account + rate-limit data. Use the current WinUI implementation and active docs as the source of truth for new work.
 
 Implement in `winui/`:
 
 1. `UsageService.cs` (new):
-   - Async service that, for each enabled profile in `AppConfigStore.Load().CodexProfiles`, spawns `codex app-server` with `CODEX_HOME` set to the profile's expanded `codexHome` path (`Environment.ExpandEnvironmentVariables`), performs the same JSON-RPC exchange as `src/main.cpp`, and extracts the two rate-limit windows: the ~5h window and the weekly window.
-   - **Semantics matter**: the UI displays *remaining* percent (label `5h` → `RemainingPercent`, label `Weekly`/`Wk` → `WeeklyPercent`). If the RPC reports `used_percent`, convert: `remaining = 100 - used`. Match what the native app displays — cross-check with how `src/main.cpp` renders its bars/labels.
+   - Async service that, for each enabled profile in `AppConfigStore.Load().CodexProfiles`, spawns `codex app-server` with `CODEX_HOME` set to the profile's expanded `codexHome` path (`Environment.ExpandEnvironmentVariables`), performs the JSON-RPC exchange, and extracts the two rate-limit windows: the ~5h window and the weekly window.
+   - **Semantics matter**: the UI displays *remaining* percent (label `5h` → `RemainingPercent`, label `Weekly`/`Wk` → `WeeklyPercent`). If the RPC reports `used_percent`, convert: `remaining = 100 - used`.
    - Also fetch the plan/account label if the RPC exposes it (the native app shows plan names); fall back to the profile label and empty plan otherwise.
    - Timeout each profile refresh (10 s), kill the child process on timeout/dispose. Never block the UI thread (use `Task`, `Process` with async stdout reading).
    - Expose: `Task<IReadOnlyList<ProviderUsage>> FetchAsync()`, an event `Updated`, a `LastRefresh` timestamp, and a periodic refresh loop driven by `RefreshIntervalSeconds` from config (restart the loop when `AppConfigStore.Changed` fires).
@@ -28,7 +31,7 @@ Implement in `winui/`:
 
 **Careful with fragile UI code**: do not touch the DWM/window-style sequences in `TaskbarWidgetWindow.xaml.cs` / `FlyoutWindow.xaml.cs` (`_frameFixTimer`, `TransparentBackdrop`, `ThinAcrylicBackdrop`, watchdog). Only touch their data/binding paths.
 
-If you cannot run `codex app-server` from your sandbox to test, that is fine: port faithfully from `src/main.cpp`, make the code defensive (null/missing JSON fields → unavailable state), and rely on the build for verification. The maintainer will test live.
+If you cannot run `codex app-server` from your sandbox to test, that is fine: make the code defensive (null/missing JSON fields → unavailable state), and rely on the build for verification. The maintainer will test live.
 
 ## Task B — Settings "Refresh interval" NumberBox bug
 
@@ -41,5 +44,5 @@ Fix in `SettingsWindow.xaml` / `.cs`:
 
 ## Verification
 
-- `dotnet build winui/CodexSwbarWinUI.csproj -c Debug -p:Platform=x64` → 0 errors, 0 warnings.
+- `dotnet build winui/FluentAgentBar.csproj -c Debug -p:Platform=x64` → 0 errors, 0 warnings.
 - Summarize: the exact RPC methods used, where the 5h/weekly windows come from, the used→remaining conversion, and your conclusion about the NumberBox overlay bug.

@@ -26,19 +26,23 @@ public sealed partial class TaskbarWidgetWindow : Window
     private readonly DispatcherQueueTimer _frameFixTimer;
     private readonly DispatcherQueueTimer _cycleTimer;
     private readonly UsageService _usageService;
+    private readonly TaskbarTarget _target;
     private bool _mouseWasDown;
     private bool _rightMouseWasDown;
     private bool _darkTaskbar = true;
     private int _watchdogTicks;
     private int _cycleIndex;
-    private IntPtr _lastTaskbarHwnd;
     private bool _anchored;
+    private bool _targetLostReported;
     private MenuFlyout? _contextMenu;
     private ToggleMenuFlyoutItem? _glowToggleItem;
     private ToggleMenuFlyoutItem? _acrylicToggleItem;
 
     public event EventHandler? UsageRequested;
     public event EventHandler? ExitRequested;
+    public event EventHandler? TargetLost;
+
+    internal IntPtr TargetHwnd => _target.Hwnd;
 
     public Geometry LogoGeometry { get; private set; } = ProviderIcons.GeometryFor("Codex");
     public Brush LogoBrush { get; private set; } = ProviderIcons.BrushFor("Codex");
@@ -63,9 +67,10 @@ public sealed partial class TaskbarWidgetWindow : Window
     public Brush PrimaryFillBrush { get; private set; } = new SolidColorBrush(Color.FromArgb(255, 96, 205, 255));
     public Brush WeeklyFillBrush { get; private set; } = new SolidColorBrush(Color.FromArgb(255, 96, 205, 255));
 
-    public TaskbarWidgetWindow(UsageService usageService)
+    internal TaskbarWidgetWindow(UsageService usageService, TaskbarTarget target)
     {
         _usageService = usageService;
+        _target = target;
         InitializeComponent();
         RefreshConfigBindings();
         Bindings.Update();
@@ -228,6 +233,7 @@ public sealed partial class TaskbarWidgetWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         _clickTimer.Stop();
+        _frameFixTimer.Stop();
         _cycleTimer.Stop();
         AppConfigStore.Changed -= OnConfigChanged;
         _usageService.Updated -= OnUsageUpdated;
@@ -260,15 +266,15 @@ public sealed partial class TaskbarWidgetWindow : Window
 
     private void PositionInTaskbar()
     {
-        IntPtr taskbar = NativeMethods.FindPrimaryTaskbar();
-        if (taskbar == IntPtr.Zero || !NativeMethods.GetWindowRect(taskbar, out NativeMethods.Rect taskbarRect))
+        IntPtr taskbar = _target.Hwnd;
+        if (!IsTargetCurrent() || !NativeMethods.GetWindowRect(taskbar, out NativeMethods.Rect taskbarRect))
         {
+            ReportTargetLost();
             return;
         }
 
-        _lastTaskbarHwnd = taskbar;
         SizeInt32 physicalSize = GetPhysicalWidgetSize(taskbar);
-        NativeMethods.Rect trayRect = NativeMethods.TryGetTrayRect(taskbarRect);
+        NativeMethods.Rect trayRect = NativeMethods.TryGetTrayRect(taskbar, taskbarRect);
 
         int taskbarWidth = taskbarRect.Right - taskbarRect.Left;
         int taskbarHeight = taskbarRect.Bottom - taskbarRect.Top;
@@ -331,7 +337,7 @@ public sealed partial class TaskbarWidgetWindow : Window
         AdoptTaskbar();
     }
 
-    // FluentFlyout reparents its widget into Shell_TrayWnd (WS_CHILD), but a
+    // FluentFlyout reparents its widget into Shell_TrayWnd, but a
     // WinUI 3 island stops compositing entirely as a cross-process child —
     // that path only works for WPF. Owning is the next best invariant: the
     // window manager keeps an owned window above its owner, so whenever
@@ -340,15 +346,15 @@ public sealed partial class TaskbarWidgetWindow : Window
     // per-pixel transparency keep working.
     private void AdoptTaskbar()
     {
-        IntPtr taskbar = NativeMethods.FindPrimaryTaskbar();
-        if (taskbar == IntPtr.Zero)
+        IntPtr taskbar = _target.Hwnd;
+        if (!IsTargetCurrent())
         {
+            ReportTargetLost();
             return;
         }
 
         NativeMethods.SetWindowOwner(_hwnd, taskbar);
         _anchored = true;
-        _lastTaskbarHwnd = taskbar;
         PositionInTaskbar();
 
         // Owner changes on a visible window only take effect reliably after a
@@ -386,7 +392,7 @@ public sealed partial class TaskbarWidgetWindow : Window
 
     private SizeInt32 GetPhysicalWidgetSize()
     {
-        return GetPhysicalWidgetSize(NativeMethods.FindPrimaryTaskbar());
+        return GetPhysicalWidgetSize(_target.Hwnd);
     }
 
     private SizeInt32 GetPhysicalWidgetSize(IntPtr taskbar)
@@ -512,8 +518,7 @@ public sealed partial class TaskbarWidgetWindow : Window
     {
         try
         {
-            // Make sure the file exists so the shell has something to open.
-            AppConfigStore.Save(AppConfigStore.Load());
+            AppConfigStore.EnsureConfigFileExists();
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = AppConfigStore.ConfigPath,
@@ -532,18 +537,20 @@ public sealed partial class TaskbarWidgetWindow : Window
     // this window with its owner, and App recreates it from scratch.
     private void VerifyWidgetStability()
     {
+        if (!IsTargetCurrent())
+        {
+            ReportTargetLost();
+            return;
+        }
+
         if (NativeMethods.IsForegroundWindowFullscreenOnMonitor(_hwnd))
         {
             return;
         }
 
-        IntPtr taskbar = NativeMethods.FindPrimaryTaskbar();
-        if (taskbar == IntPtr.Zero)
-        {
-            return;
-        }
+        IntPtr taskbar = _target.Hwnd;
 
-        if (!_anchored || taskbar != _lastTaskbarHwnd)
+        if (!_anchored)
         {
             AdoptTaskbar();
             return;
@@ -555,6 +562,23 @@ public sealed partial class TaskbarWidgetWindow : Window
         }
     }
 
+    private bool IsTargetCurrent()
+    {
+        return _target.Hwnd != IntPtr.Zero &&
+            NativeMethods.FindTaskbars().Any(target => target.Hwnd == _target.Hwnd);
+    }
+
+    private void ReportTargetLost()
+    {
+        if (_targetLostReported)
+        {
+            return;
+        }
+
+        _targetLostReported = true;
+        TargetLost?.Invoke(this, EventArgs.Empty);
+    }
+
     private bool IsNearExpectedTaskbarPosition(IntPtr taskbar)
     {
         if (!NativeMethods.GetWindowRect(taskbar, out NativeMethods.Rect taskbarRect) ||
@@ -564,7 +588,7 @@ public sealed partial class TaskbarWidgetWindow : Window
         }
 
         SizeInt32 physicalSize = GetPhysicalWidgetSize(taskbar);
-        NativeMethods.Rect trayRect = NativeMethods.TryGetTrayRect(taskbarRect);
+        NativeMethods.Rect trayRect = NativeMethods.TryGetTrayRect(taskbar, taskbarRect);
 
         int taskbarWidth = taskbarRect.Right - taskbarRect.Left;
         int taskbarHeight = taskbarRect.Bottom - taskbarRect.Top;

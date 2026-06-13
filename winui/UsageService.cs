@@ -16,6 +16,8 @@ public sealed class UsageService : IDisposable
     private readonly HashSet<Process> _activeProcesses = [];
     private readonly ClaudeUsageService _claudeUsageService = new();
     private readonly TokenStatsService _tokenStatsService = new();
+    private readonly Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> _fetchCodexProfileAsync;
+    private readonly Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> _fetchClaudeProfileAsync;
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
     private bool _disposed;
@@ -27,6 +29,17 @@ public sealed class UsageService : IDisposable
 
     public UsageService()
     {
+        _fetchCodexProfileAsync = FetchCodexProfileAsync;
+        _fetchClaudeProfileAsync = FetchClaudeProfileAsync;
+        AppConfigStore.Changed += OnConfigChanged;
+    }
+
+    internal UsageService(
+        Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> fetchCodexProfileAsync,
+        Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> fetchClaudeProfileAsync)
+    {
+        _fetchCodexProfileAsync = fetchCodexProfileAsync;
+        _fetchClaudeProfileAsync = fetchClaudeProfileAsync;
         AppConfigStore.Changed += OnConfigChanged;
     }
 
@@ -114,32 +127,29 @@ public sealed class UsageService : IDisposable
         }
     }
 
-    private async Task<IReadOnlyList<ProviderUsage>> FetchProvidersAsync(AppConfig config, CancellationToken cancellationToken)
+    internal async Task<IReadOnlyList<ProviderUsage>> FetchProvidersAsync(AppConfig config, CancellationToken cancellationToken)
     {
         List<ProviderUsage> providers = [];
-        List<ProfileUsage> codexProfiles = [];
-        List<ProfileUsage> claudeProfiles = [];
         List<ProfileConfig> enabledProfiles = config.Profiles
             .Where(profile => profile.Enabled)
             .ToList();
 
-        foreach (ProfileConfig profile in enabledProfiles.Where(profile => AppConfigStore.IsProvider(profile, "codex")))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            codexProfiles.Add(await FetchCodexProfileAsync(profile, cancellationToken));
-        }
+        List<ProfileUsage> codexProfiles = await FetchProfileGroupAsync(
+            enabledProfiles.Where(profile => AppConfigStore.IsProvider(profile, "codex")),
+            _fetchCodexProfileAsync,
+            MockUsageData.CodexAccentColor,
+            cancellationToken);
 
         if (codexProfiles.Count > 0)
         {
             providers.Add(new ProviderUsage("Codex", "C", codexProfiles));
         }
 
-        foreach (ProfileConfig profile in enabledProfiles.Where(profile => AppConfigStore.IsProvider(profile, "claude")))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            ProfileUsage usage = await _claudeUsageService.FetchAsync(profile.Home, cancellationToken);
-            claudeProfiles.Add(usage with { Label = profile.Label });
-        }
+        List<ProfileUsage> claudeProfiles = await FetchProfileGroupAsync(
+            enabledProfiles.Where(profile => AppConfigStore.IsProvider(profile, "claude")),
+            _fetchClaudeProfileAsync,
+            MockUsageData.ClaudeAccentColor,
+            cancellationToken);
 
         if (claudeProfiles.Count > 0)
         {
@@ -147,6 +157,44 @@ public sealed class UsageService : IDisposable
         }
 
         return providers;
+    }
+
+    private static async Task<List<ProfileUsage>> FetchProfileGroupAsync(
+        IEnumerable<ProfileConfig> profiles,
+        Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> fetchAsync,
+        Windows.UI.Color unavailableAccentColor,
+        CancellationToken cancellationToken)
+    {
+        List<ProfileConfig> orderedProfiles = profiles.ToList();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Task<ProfileUsage>[] tasks = orderedProfiles
+            .Select(profile => FetchProfileSafelyAsync(profile, fetchAsync, unavailableAccentColor, cancellationToken))
+            .ToArray();
+
+        ProfileUsage[] usages = await Task.WhenAll(tasks);
+        return [.. usages];
+    }
+
+    private static async Task<ProfileUsage> FetchProfileSafelyAsync(
+        ProfileConfig profile,
+        Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> fetchAsync,
+        Windows.UI.Color unavailableAccentColor,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await fetchAsync(profile, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            return Unavailable(profile, unavailableAccentColor);
+        }
     }
 
     private async Task<(TokenReport? codex, TokenReport? claude)> ComputeTokenStatsSafelyAsync(AppConfig config)
@@ -275,6 +323,12 @@ public sealed class UsageService : IDisposable
         {
             UnregisterProcess(process);
         }
+    }
+
+    private async Task<ProfileUsage> FetchClaudeProfileAsync(ProfileConfig profile, CancellationToken cancellationToken)
+    {
+        ProfileUsage usage = await _claudeUsageService.FetchAsync(profile.Home, cancellationToken);
+        return usage with { Label = profile.Label };
     }
 
     private static ProcessStartInfo CreateCodexAppServerStartInfo(string codexHome)
@@ -635,7 +689,12 @@ public sealed class UsageService : IDisposable
 
     private static ProfileUsage Unavailable(ProfileConfig profile)
     {
-        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, MockUsageData.CodexAccentColor);
+        return Unavailable(profile, MockUsageData.CodexAccentColor);
+    }
+
+    private static ProfileUsage Unavailable(ProfileConfig profile, Windows.UI.Color accentColor)
+    {
+        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, accentColor);
     }
 
     private void RegisterProcess(Process process)

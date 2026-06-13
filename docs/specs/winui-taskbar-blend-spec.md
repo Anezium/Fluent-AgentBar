@@ -1,7 +1,10 @@
-# Spec: Make the WinUI taskbar widget blend into the taskbar (FluentFlyout pattern)
+# Historical Spec: Make the WinUI taskbar widget blend into the taskbar (FluentFlyout pattern)
 
-Repo: `e:\Tools\Codex-SWBar-Windows`, project `winui\CodexSwbarWinUI.csproj` (WinUI 3 / WinAppSDK, net8.0-windows10.0.19041.0, x64).
-Build check: `dotnet build winui\CodexSwbarWinUI.csproj -c Debug -p:Platform=x64` must end with 0 errors / 0 warnings.
+Legacy reference only. This spec records a past implementation task and may not
+match the current WinUI code exactly.
+
+Repo: `e:\Tools\Fluent-AgentBar`, project `winui\FluentAgentBar.csproj` (WinUI 3 / WinAppSDK, net8.0-windows10.0.19041.0, x64).
+Build check: `dotnet build winui\FluentAgentBar.csproj -c Debug -p:Platform=x64` must end with 0 errors / 0 warnings.
 
 ## Problem
 
@@ -18,7 +21,7 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 
-namespace CodexSwbarWinUI;
+namespace FluentAgentBar;
 
 internal sealed partial class TransparentBackdrop : SystemBackdrop
 {

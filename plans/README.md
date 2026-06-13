@@ -13,14 +13,14 @@ ports.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Establish a WinUI verification baseline | P1 | M | - | TODO |
-| 002 | Make WinUI canonical and quarantine legacy C++ | P1 | M | 001 | TODO |
-| 003 | Preserve bad configs instead of replacing them silently | P1 | S | 001 | TODO |
-| 004 | Enforce single-instance WinUI startup | P1 | M | 001 | TODO |
-| 005 | Refresh provider profiles concurrently | P2 | M | 001 | TODO |
-| 006 | Support one widget per taskbar monitor | P2 | L | 001, 004 | TODO |
-| 007 | Re-enable dependency auditing | P2 | S | 001 | TODO |
-| 008 | Reconcile stale specs and user docs | P2 | S | 002 | TODO |
+| 001 | Establish a WinUI verification baseline | P1 | M | - | DONE |
+| 002 | Make WinUI canonical and quarantine legacy C++ | P1 | M | 001 | DONE |
+| 003 | Preserve bad configs instead of replacing them silently | P1 | S | 001 | DONE |
+| 004 | Enforce single-instance WinUI startup | P1 | M | 001 | DONE |
+| 005 | Refresh provider profiles concurrently | P2 | M | 001 | DONE |
+| 006 | Support one widget per taskbar monitor | P2 | L | 001, 004 | DONE |
+| 007 | Re-enable dependency auditing | P2 | S | 001 | DONE |
+| 008 | Reconcile stale specs and user docs | P2 | S | 002 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).

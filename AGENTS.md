@@ -10,7 +10,7 @@ All UI work must follow the Windows Fluent design system described there.
 
 When implementing UI:
 
-1. Reuse the existing Fluent palette, drawing helpers, and spacing/radius patterns in `src/main.cpp`.
+1. Reuse WinUI theme resources, existing XAML styles, existing WinUI brush helpers such as `ProviderIcons` and `TaskbarTheme`, and the current XAML spacing/radius patterns. Treat `src/main.cpp` as legacy reference only, not a source of truth.
 2. Do not introduce random colors, shadows, border radii, font sizes, or gradients.
 3. Do not create generic glassmorphism. Main app/settings surfaces should feel Mica-like; flyouts should feel Acrylic-like.
 4. Prefer Windows 11 Fluent 2 patterns: subtle borders, Segoe UI typography, compact spacing, calm accent fills, and dense but breathable command surfaces.

@@ -1,6 +1,6 @@
 # Windows Fluent Design System
 
-Codex SWBar Windows should feel like a native Windows 11 / Fluent 2 taskbar utility, not like a generic web dashboard.
+Fluent AgentBar should feel like a native Windows 11 / Fluent 2 taskbar utility, not like a generic web dashboard.
 
 ## Visual Target
 
@@ -73,7 +73,7 @@ Use Windows 11-like geometry:
 
 ## Color Tokens
 
-The native C++ implementation uses `COLORREF` values in `src/main.cpp`. Keep them aligned with these roles:
+Route colors through WinUI theme resources, existing XAML styles, and shared helpers such as `ProviderIcons` and `TaskbarTheme`. Keep those resources aligned with these roles:
 
 - App base: dark `Rgb(32, 32, 36)` / light `Rgb(243, 243, 243)`
 - Surface: dark `Rgb(43, 43, 48)` / light `Rgb(251, 251, 251)`

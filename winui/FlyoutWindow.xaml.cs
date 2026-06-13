@@ -546,8 +546,7 @@ public sealed partial class FlyoutWindow : Window
     {
         try
         {
-            // Make sure the file exists so the shell has something to open.
-            AppConfigStore.Save(AppConfigStore.Load());
+            AppConfigStore.EnsureConfigFileExists();
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = AppConfigStore.ConfigPath,

@@ -1,3 +1,5 @@
+# Legacy C++ build only. Do not use this as the verification command for WinUI changes.
+
 param(
     [switch]$Release
 )

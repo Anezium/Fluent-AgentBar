@@ -12,3 +12,5 @@ autoreview-*.txt
 artifacts/
 winui/bin/
 winui/obj/
+winui/**/bin/
+winui/**/obj/

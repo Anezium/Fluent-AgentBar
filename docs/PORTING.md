@@ -1,8 +1,15 @@
-# Porting Notes
+# Historical Porting Notes
+
+This document is a legacy reference for the original C++ porting path. It may
+contain historical product names, configuration paths, and implementation
+details that are no longer authoritative for active WinUI work. The active app
+is `winui\FluentAgentBar.csproj`; use `.\scripts\verify-winui.ps1` for current
+verification.
 
 ## Goal
 
-Build Codex SWBar Windows as a native Windows version of the parts of CodexBar that matter here:
+Build Codex SWBar Windows, the historical product name for this porting phase,
+as a native Windows version of the parts of CodexBar that mattered here:
 
 - Codex usage/account visibility.
 - Claude usage/account visibility.
@@ -60,7 +67,14 @@ unknown variant `default`, expected `fast` or `flex`
 
 Codex falls back to defaults and `account/read` still works, but quota debugging should be repeated after that config is corrected.
 
-Multi-profile support is implemented by setting `CODEX_HOME` per configured profile before launching `codex app-server`. The default profile lives under `%APPDATA%\Codex SWBar Windows\profiles\main`, not under `%USERPROFILE%\.codex`, so Codex SWBar Windows does not switch or log out the user's normal Codex Desktop/CLI profile. Profiles can be added, renamed, enabled/disabled, opened, and logged into from Settings; the JSON config remains the backing store.
+In this historical implementation, multi-profile support is implemented by
+setting `CODEX_HOME` per configured profile before launching `codex app-server`.
+The default profile lived under
+`%APPDATA%\Codex SWBar Windows\profiles\main`, not under
+`%USERPROFILE%\.codex`, so Codex SWBar Windows did not switch or log out the
+user's normal Codex Desktop/CLI profile. Profiles could be added, renamed,
+enabled/disabled, opened, and logged into from Settings; the JSON config
+remained the backing store.
 
 Profile login uses app-server auth:
 
@@ -87,11 +101,15 @@ Next bridge options:
 
 ## Config
 
-Runtime config lives at:
+Historical runtime config lived at:
 
 ```text
 %APPDATA%\Codex SWBar Windows\config.json
 ```
+
+Current Fluent AgentBar runtime config lives at
+`%APPDATA%\Fluent AgentBar\config.json`; the WinUI app may copy the historical
+config there on first run when no current config exists.
 
 The app creates a default config on first run.
 The Settings action writes refresh timing and Claude enablement back to this file.

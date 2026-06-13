@@ -1,6 +1,9 @@
-# Spec: Real Claude usage + token consumption stats (WinUI app)
+# Historical Spec: Real Claude usage + token consumption stats (WinUI app)
 
-Scope: `winui/` project only (`dotnet build winui/CodexSwbarWinUI.csproj` must pass, 0 warnings ideally).
+Legacy reference only. This spec records a past implementation task and may not
+match the current WinUI code exactly.
+
+Scope: `winui/` project only (`dotnet build winui/FluentAgentBar.csproj` must pass, 0 warnings ideally).
 Style: match existing code (file-scoped namespaces, explicit types, defensive try/catch with `Debug.WriteLine`).
 UI rules: `AGENTS.md` + `docs/design/fluent-windows.md` (Fluent 2, no new colors outside existing palette).
 
@@ -88,7 +91,7 @@ UI (minimal, Fluent-consistent):
 
 ## Acceptance
 
-- `dotnet build winui/CodexSwbarWinUI.csproj` passes.
+- `dotnet build winui/FluentAgentBar.csproj` passes.
 - With a logged-in Claude CLI on the machine, the flyout shows real 5h/weekly percentages for Claude.
 - Without Claude credentials, Claude row shows `--` (IsAvailable=false), no crash, no log spam.
 - Token line appears for providers whose local session files exist; absent otherwise.

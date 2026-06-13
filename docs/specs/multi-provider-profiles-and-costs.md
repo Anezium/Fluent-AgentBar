@@ -1,6 +1,9 @@
-# Spec: Multi-provider profiles, per-profile Claude accounts, USD cost calculation
+# Historical Spec: Multi-provider profiles, per-profile Claude accounts, USD cost calculation
 
-Scope: `winui/` project. `dotnet build winui/CodexSwbarWinUI.csproj` must pass (0 warnings).
+Legacy reference only. This spec records a past implementation task and may not
+match the current WinUI code exactly.
+
+Scope: `winui/` project. `dotnet build winui/FluentAgentBar.csproj` must pass (0 warnings).
 Style: match existing code. **Do NOT redesign `SettingsWindow.xaml` / `SettingsWindow.xaml.cs` UI** — the
 frontend pass happens separately. You may make minimal mechanical edits there only to keep the build
 green after the schema change (rename property references, adapt handlers).
@@ -14,7 +17,7 @@ Replace the codex-only profile model with provider-aware profiles:
   "refreshIntervalSeconds": 300,
   "flyoutStyle": "acrylic",
   "profiles": [
-    { "provider": "codex",  "label": "Main",     "home": "%APPDATA%\\Codex SWBar Windows\\profiles\\main", "enabled": true },
+    { "provider": "codex",  "label": "Main",     "home": "%APPDATA%\\Fluent AgentBar\\profiles\\main", "enabled": true },
     { "provider": "claude", "label": "Personal", "home": "%USERPROFILE%\\.claude",                          "enabled": true }
   ]
 }

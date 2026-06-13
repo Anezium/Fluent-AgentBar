@@ -22,7 +22,6 @@ internal static partial class NativeMethods
     internal const int WS_EX_LAYERED = 0x00080000;
     private const uint LWA_COLORKEY = 0x00000001;
     internal const int WS_EX_TOOLWINDOW = 0x00000080;
-    internal const int WS_CHILD = 0x40000000;
     internal const int WS_CLIPCHILDREN = 0x02000000;
     internal const int WS_CLIPSIBLINGS = 0x04000000;
     internal const int WS_POPUP = unchecked((int)0x80000000);
@@ -69,9 +68,6 @@ internal static partial class NativeMethods
 
     [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", StringMarshalling = StringMarshalling.Utf16)]
     internal static partial IntPtr FindWindowEx(IntPtr parentHandle, IntPtr childAfter, string? className, string? windowTitle);
-
-    [LibraryImport("user32.dll", SetLastError = true)]
-    internal static partial IntPtr SetParent(IntPtr childHandle, IntPtr newParentHandle);
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -169,6 +165,35 @@ internal static partial class NativeMethods
         return FindWindow("Shell_TrayWnd", null);
     }
 
+    internal static IReadOnlyList<TaskbarTarget> FindTaskbars()
+    {
+        List<TaskbarTarget> targets = [];
+        HashSet<IntPtr> seen = [];
+
+        IntPtr primary = FindPrimaryTaskbar();
+        if (primary != IntPtr.Zero && seen.Add(primary))
+        {
+            targets.Add(new TaskbarTarget(primary, IsPrimary: true));
+        }
+
+        IntPtr secondary = IntPtr.Zero;
+        while (true)
+        {
+            secondary = FindWindowEx(IntPtr.Zero, secondary, "Shell_SecondaryTrayWnd", null);
+            if (secondary == IntPtr.Zero)
+            {
+                break;
+            }
+
+            if (seen.Add(secondary))
+            {
+                targets.Add(new TaskbarTarget(secondary, IsPrimary: false));
+            }
+        }
+
+        return targets;
+    }
+
     internal static Rect GetPrimaryTaskbarRect()
     {
         IntPtr taskbar = FindPrimaryTaskbar();
@@ -189,6 +214,11 @@ internal static partial class NativeMethods
     internal static Rect TryGetTrayRect(Rect fallbackTaskbarRect)
     {
         IntPtr taskbar = FindPrimaryTaskbar();
+        return TryGetTrayRect(taskbar, fallbackTaskbarRect);
+    }
+
+    internal static Rect TryGetTrayRect(IntPtr taskbar, Rect fallbackTaskbarRect)
+    {
         if (taskbar == IntPtr.Zero)
         {
             return fallbackTaskbarRect;

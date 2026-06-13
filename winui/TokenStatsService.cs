@@ -76,6 +76,13 @@ internal sealed class TokenStatsService
 
     public Task<(TokenReport? codex, TokenReport? claude)> ComputeAsync(AppConfig config)
     {
+        return ComputeAsync(config, includeDefaultCodexHome: true);
+    }
+
+    internal Task<(TokenReport? codex, TokenReport? claude)> ComputeAsync(
+        AppConfig config,
+        bool includeDefaultCodexHome)
+    {
         return Task.Run(() =>
         {
             TokenReport? codex = null;
@@ -83,7 +90,7 @@ internal sealed class TokenStatsService
 
             try
             {
-                codex = ComputeCodex(config);
+                codex = ComputeCodex(config, includeDefaultCodexHome);
             }
             catch (Exception ex)
             {
@@ -103,7 +110,7 @@ internal sealed class TokenStatsService
         });
     }
 
-    private static TokenReport? ComputeCodex(AppConfig config)
+    private static TokenReport? ComputeCodex(AppConfig config, bool includeDefaultCodexHome)
     {
         DateTime today = DateTime.Today;
         DateTime minDay = today.AddDays(-(HistoryDays - 1));
@@ -116,10 +123,13 @@ internal sealed class TokenStatsService
             AddNormalizedDirectory(codexHomes, profile.Home);
         }
 
-        string userProfile = GetUserProfileDirectory();
-        if (!string.IsNullOrWhiteSpace(userProfile))
+        if (includeDefaultCodexHome)
         {
-            AddNormalizedDirectory(codexHomes, Path.Combine(userProfile, ".codex"));
+            string userProfile = GetUserProfileDirectory();
+            if (!string.IsNullOrWhiteSpace(userProfile))
+            {
+                AddNormalizedDirectory(codexHomes, Path.Combine(userProfile, ".codex"));
+            }
         }
 
         foreach (string codexHome in codexHomes)

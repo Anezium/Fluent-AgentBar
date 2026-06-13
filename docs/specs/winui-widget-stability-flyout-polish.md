@@ -1,7 +1,10 @@
-# Spec: widget stability + flyout visual polish
+# Historical Spec: widget stability + flyout visual polish
 
-Repo: `e:\Tools\Codex-SWBar-Windows`, project `winui\CodexSwbarWinUI.csproj` (WinUI 3, net8.0-windows10.0.19041.0, x64).
-Build check: `dotnet build winui/CodexSwbarWinUI.csproj -c Debug -p:Platform=x64` → must end 0 errors / 0 warnings.
+Legacy reference only. This spec records a past implementation task and may not
+match the current WinUI code exactly.
+
+Repo: `e:\Tools\Fluent-AgentBar`, project `winui\FluentAgentBar.csproj` (WinUI 3, net8.0-windows10.0.19041.0, x64).
+Build check: `dotnet build winui/FluentAgentBar.csproj -c Debug -p:Platform=x64` → must end 0 errors / 0 warnings.
 Do not commit. Work only inside `winui/`.
 
 ## Context — fragile code, do NOT refactor
