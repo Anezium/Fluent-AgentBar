@@ -32,7 +32,7 @@ The executable is written to `winui\bin\Debug\net8.0-windows10.0.19041.0\win-x64
 .\winui\bin\Debug\net8.0-windows10.0.19041.0\win-x64\FluentAgentBar.exe
 ```
 
-The app starts in the background and creates a compact Codex presence directly inside the Windows taskbar. Click the taskbar presence to open the CodexBar flyout. Launching the executable again focuses the existing instance's Settings window. The tray icon remains as a fallback: left-click opens the flyout, and right-click shows Refresh, Settings, new profile, Codex profile login, Open config, Open profiles folder, and Exit.
+The app starts in the background and creates a compact usage widget directly inside the Windows taskbar. Left-click the widget to open the usage flyout. Right-click the widget for a context menu with Refresh now, Settings, Open config file, quick toggles (widget glow, acrylic flyout), and Exit. Launching the executable again focuses the existing instance's Settings window.
 
 ## Multi-provider Profiles
 

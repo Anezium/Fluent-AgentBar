@@ -5,6 +5,7 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <AssemblyName>FluentAgentBar</AssemblyName>
     <RootNamespace>FluentAgentBar</RootNamespace>
+    <Version>0.1.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\assets\codex-swbar.ico</ApplicationIcon>
     <UseWinUI>true</UseWinUI>

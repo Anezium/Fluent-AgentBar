@@ -479,6 +479,18 @@ public sealed partial class SettingsWindow : Window
         ContentPanel.Width = Math.Min(availableWidth, ContentPanel.MaxWidth);
     }
 
+    public static void CloseInstance()
+    {
+        try
+        {
+            _instance?.Close();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+    }
+
     public static void ShowInstance()
     {
         try

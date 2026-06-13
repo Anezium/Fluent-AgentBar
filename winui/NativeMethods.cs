@@ -466,6 +466,11 @@ internal static partial class NativeMethods
         return IsKeyDown(VK_LBUTTON);
     }
 
+    internal static bool IsRightMouseButtonDown()
+    {
+        return IsKeyDown(VK_RBUTTON);
+    }
+
     private static bool IsKeyDown(int virtualKey)
     {
         return (GetAsyncKeyState(virtualKey) & unchecked((short)0x8000)) != 0;

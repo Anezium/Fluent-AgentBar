@@ -2,6 +2,8 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using WinRT.Interop;
 using Windows.Graphics;
@@ -25,13 +27,18 @@ public sealed partial class TaskbarWidgetWindow : Window
     private readonly DispatcherQueueTimer _cycleTimer;
     private readonly UsageService _usageService;
     private bool _mouseWasDown;
+    private bool _rightMouseWasDown;
     private bool _darkTaskbar = true;
     private int _watchdogTicks;
     private int _cycleIndex;
     private IntPtr _lastTaskbarHwnd;
     private bool _anchored;
+    private MenuFlyout? _contextMenu;
+    private ToggleMenuFlyoutItem? _glowToggleItem;
+    private ToggleMenuFlyoutItem? _acrylicToggleItem;
 
     public event EventHandler? UsageRequested;
+    public event EventHandler? ExitRequested;
 
     public Geometry LogoGeometry { get; private set; } = ProviderIcons.GeometryFor("Codex");
     public Brush LogoBrush { get; private set; } = ProviderIcons.BrushFor("Codex");
@@ -166,6 +173,9 @@ public sealed partial class TaskbarWidgetWindow : Window
         WeeklyFillWidth = new GridLength(Math.Clamp(WeeklyPercent, 0, 100), GridUnitType.Star);
         WeeklyRestWidth = new GridLength(100 - Math.Clamp(WeeklyPercent, 0, 100), GridUnitType.Star);
         _darkTaskbar = TaskbarTheme.IsDark();
+        // Popups opened from the widget (tooltip, context menu) must follow
+        // the taskbar theme, not the apps theme — same split as the flyout.
+        Shell.RequestedTheme = _darkTaskbar ? ElementTheme.Dark : ElementTheme.Light;
         TrackBrush = new SolidColorBrush(_darkTaskbar
             ? Color.FromArgb(48, 255, 255, 255)
             : Color.FromArgb(40, 0, 0, 0));
@@ -400,11 +410,14 @@ public sealed partial class TaskbarWidgetWindow : Window
             VerifyWidgetStability();
         }
 
-        bool mouseDown = NativeMethods.IsLeftMouseButtonDown();
-        bool clickedNow = mouseDown && !_mouseWasDown;
-        _mouseWasDown = mouseDown;
+        bool leftDown = NativeMethods.IsLeftMouseButtonDown();
+        bool rightDown = NativeMethods.IsRightMouseButtonDown();
+        bool leftClickedNow = leftDown && !_mouseWasDown;
+        bool rightClickedNow = rightDown && !_rightMouseWasDown;
+        _mouseWasDown = leftDown;
+        _rightMouseWasDown = rightDown;
 
-        if (!clickedNow ||
+        if ((!leftClickedNow && !rightClickedNow) ||
             !NativeMethods.GetCursorPos(out NativeMethods.Point cursor) ||
             !NativeMethods.GetWindowRect(_hwnd, out NativeMethods.Rect rect))
         {
@@ -417,9 +430,99 @@ public sealed partial class TaskbarWidgetWindow : Window
             cursor.Y >= rect.Top &&
             cursor.Y <= rect.Bottom;
 
-        if (inside)
+        if (!inside)
+        {
+            return;
+        }
+
+        if (leftClickedNow)
         {
             UsageRequested?.Invoke(this, EventArgs.Empty);
+        }
+        else
+        {
+            ShowContextMenu(cursor, rect);
+        }
+    }
+
+    private void ShowContextMenu(NativeMethods.Point cursor, NativeMethods.Rect rect)
+    {
+        _contextMenu ??= CreateContextMenu();
+
+        AppConfig config = AppConfigStore.Load();
+        _glowToggleItem!.IsChecked = config.WidgetGlowEnabled;
+        _acrylicToggleItem!.IsChecked = string.Equals(config.FlyoutStyle, "acrylic", StringComparison.OrdinalIgnoreCase);
+
+        double scale = Math.Max(1.0, Shell.XamlRoot?.RasterizationScale ?? 1.0);
+        _contextMenu.ShowAt(Shell, new FlyoutShowOptions
+        {
+            Position = new Windows.Foundation.Point(
+                (cursor.X - rect.Left) / scale,
+                (cursor.Y - rect.Top) / scale),
+            Placement = FlyoutPlacementMode.Top
+        });
+    }
+
+    private MenuFlyout CreateContextMenu()
+    {
+        MenuFlyout menu = new();
+
+        MenuFlyoutItem refreshItem = new() { Text = "Refresh now", Icon = new FontIcon { Glyph = "" } };
+        refreshItem.Click += (_, _) => _ = _usageService.FetchAsync();
+
+        MenuFlyoutItem settingsItem = new() { Text = "Settings", Icon = new FontIcon { Glyph = "" } };
+        settingsItem.Click += (_, _) => SettingsWindow.ShowInstance();
+
+        MenuFlyoutItem configItem = new() { Text = "Open config file", Icon = new FontIcon { Glyph = "" } };
+        configItem.Click += OnOpenConfigClick;
+
+        _glowToggleItem = new ToggleMenuFlyoutItem { Text = "Widget glow" };
+        _glowToggleItem.Click += (_, _) =>
+        {
+            AppConfig config = AppConfigStore.Load();
+            config.WidgetGlowEnabled = !config.WidgetGlowEnabled;
+            AppConfigStore.Save(config);
+        };
+
+        _acrylicToggleItem = new ToggleMenuFlyoutItem { Text = "Acrylic flyout" };
+        _acrylicToggleItem.Click += (_, _) =>
+        {
+            AppConfig config = AppConfigStore.Load();
+            config.FlyoutStyle = string.Equals(config.FlyoutStyle, "acrylic", StringComparison.OrdinalIgnoreCase)
+                ? "solid"
+                : "acrylic";
+            AppConfigStore.Save(config);
+        };
+
+        MenuFlyoutItem exitItem = new() { Text = "Exit", Icon = new FontIcon { Glyph = "" } };
+        exitItem.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
+
+        menu.Items.Add(refreshItem);
+        menu.Items.Add(settingsItem);
+        menu.Items.Add(configItem);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(_glowToggleItem);
+        menu.Items.Add(_acrylicToggleItem);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(exitItem);
+        return menu;
+    }
+
+    private void OnOpenConfigClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // Make sure the file exists so the shell has something to open.
+            AppConfigStore.Save(AppConfigStore.Load());
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = AppConfigStore.ConfigPath,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
         }
     }
 

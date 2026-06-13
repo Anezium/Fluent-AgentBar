@@ -10,6 +10,7 @@ public partial class App : Application
     private TaskbarWidgetWindow? _taskbarWidgetWindow;
     private DispatcherQueueTimer? _widgetRecoveryTimer;
     private int _taskbarSettleTicks;
+    private bool _exiting;
 
     public App()
     {
@@ -44,8 +45,24 @@ public partial class App : Application
     {
         _taskbarWidgetWindow = new TaskbarWidgetWindow(_usageService!);
         _taskbarWidgetWindow.UsageRequested += OnTaskbarUsageRequested;
+        _taskbarWidgetWindow.ExitRequested += OnExitRequested;
         _taskbarWidgetWindow.Closed += OnTaskbarWidgetClosed;
         _taskbarWidgetWindow.ShowNoActivate();
+    }
+
+    private void OnExitRequested(object? sender, EventArgs e)
+    {
+        if (_exiting)
+        {
+            return;
+        }
+
+        _exiting = true;
+        _usageService?.Dispose();
+        SettingsWindow.CloseInstance();
+        _flyoutWindow?.Close();
+        _taskbarWidgetWindow?.Close();
+        Exit();
     }
 
     // The widget lives as a child of Shell_TrayWnd, so an Explorer restart
@@ -56,11 +73,12 @@ public partial class App : Application
         if (_taskbarWidgetWindow is not null)
         {
             _taskbarWidgetWindow.UsageRequested -= OnTaskbarUsageRequested;
+            _taskbarWidgetWindow.ExitRequested -= OnExitRequested;
             _taskbarWidgetWindow.Closed -= OnTaskbarWidgetClosed;
             _taskbarWidgetWindow = null;
         }
 
-        if (_widgetRecoveryTimer is not null)
+        if (_exiting || _widgetRecoveryTimer is not null)
         {
             return;
         }
