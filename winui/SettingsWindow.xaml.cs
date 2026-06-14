@@ -43,6 +43,7 @@ public sealed partial class SettingsWindow : Window
         ConfigureWindow();
         ApplyConfig(AppConfigStore.Load());
         AppConfigStore.Changed += OnConfigChanged;
+        WindowsStartupService.Changed += OnStartupChanged;
         Closed += OnClosed;
     }
 
@@ -61,12 +62,18 @@ public sealed partial class SettingsWindow : Window
         DispatcherQueue.TryEnqueue(() => ApplyConfig(AppConfigStore.Load()));
     }
 
+    private void OnStartupChanged(object? sender, EventArgs e)
+    {
+        DispatcherQueue.TryEnqueue(ApplyStartupState);
+    }
+
     private void ApplyConfig(AppConfig config)
     {
         _isApplyingConfig = true;
         try
         {
             RefreshIntervalNumberBox.Value = Math.Clamp(config.RefreshIntervalSeconds, 30, 3600);
+            StartupToggle.IsOn = WindowsStartupService.IsEnabled();
             WidgetGlowToggle.IsOn = config.WidgetGlowEnabled;
             BackdropComboBox.SelectedIndex =
                 string.Equals(config.FlyoutStyle, "solid", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
@@ -77,6 +84,19 @@ public sealed partial class SettingsWindow : Window
         }
 
         RebuildProfileCards(config);
+    }
+
+    private void ApplyStartupState()
+    {
+        _isApplyingConfig = true;
+        try
+        {
+            StartupToggle.IsOn = WindowsStartupService.IsEnabled();
+        }
+        finally
+        {
+            _isApplyingConfig = false;
+        }
     }
 
     private void RebuildProfileCards(AppConfig config)
@@ -420,6 +440,23 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
+    private async void OnStartupToggled(object sender, RoutedEventArgs e)
+    {
+        if (_isApplyingConfig)
+        {
+            return;
+        }
+
+        bool requested = StartupToggle.IsOn;
+        if (WindowsStartupService.TrySetEnabled(requested, out string errorMessage))
+        {
+            return;
+        }
+
+        ApplyStartupState();
+        await ShowMessageAsync("Could not update startup setting", errorMessage);
+    }
+
     private void OnBackdropSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_isApplyingConfig)
@@ -544,6 +581,7 @@ public sealed partial class SettingsWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         AppConfigStore.Changed -= OnConfigChanged;
+        WindowsStartupService.Changed -= OnStartupChanged;
         if (ReferenceEquals(_instance, this))
         {
             _instance = null;

@@ -48,6 +48,17 @@
                     </toolkit:SettingsCard>
 
                     <toolkit:SettingsCard
+                        x:Name="StartupCard"
+                        Header="Start with Windows"
+                        Description="Launch Fluent AgentBar when you sign in">
+                        <ToggleSwitch
+                            x:Name="StartupToggle"
+                            OffContent="Off"
+                            OnContent="On"
+                            Toggled="OnStartupToggled" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
                         x:Name="WidgetGlowCard"
                         Header="Widget glow"
                         Description="Faint provider-colored tint behind the taskbar widget">

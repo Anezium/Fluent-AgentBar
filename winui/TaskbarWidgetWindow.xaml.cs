@@ -37,6 +37,7 @@ public sealed partial class TaskbarWidgetWindow : Window
     private MenuFlyout? _contextMenu;
     private ToggleMenuFlyoutItem? _glowToggleItem;
     private ToggleMenuFlyoutItem? _acrylicToggleItem;
+    private ToggleMenuFlyoutItem? _startupToggleItem;
 
     public event EventHandler? UsageRequested;
     public event EventHandler? ExitRequested;
@@ -458,6 +459,7 @@ public sealed partial class TaskbarWidgetWindow : Window
         AppConfig config = AppConfigStore.Load();
         _glowToggleItem!.IsChecked = config.WidgetGlowEnabled;
         _acrylicToggleItem!.IsChecked = string.Equals(config.FlyoutStyle, "acrylic", StringComparison.OrdinalIgnoreCase);
+        _startupToggleItem!.IsChecked = WindowsStartupService.IsEnabled();
 
         double scale = Math.Max(1.0, Shell.XamlRoot?.RasterizationScale ?? 1.0);
         _contextMenu.ShowAt(Shell, new FlyoutShowOptions
@@ -490,6 +492,17 @@ public sealed partial class TaskbarWidgetWindow : Window
             AppConfigStore.Save(config);
         };
 
+        _startupToggleItem = new ToggleMenuFlyoutItem { Text = "Start with Windows" };
+        _startupToggleItem.Click += (_, _) =>
+        {
+            bool requested = _startupToggleItem.IsChecked;
+            if (!WindowsStartupService.TrySetEnabled(requested, out string errorMessage))
+            {
+                _startupToggleItem.IsChecked = WindowsStartupService.IsEnabled();
+                System.Diagnostics.Debug.WriteLine(errorMessage);
+            }
+        };
+
         _acrylicToggleItem = new ToggleMenuFlyoutItem { Text = "Acrylic flyout" };
         _acrylicToggleItem.Click += (_, _) =>
         {
@@ -507,6 +520,7 @@ public sealed partial class TaskbarWidgetWindow : Window
         menu.Items.Add(settingsItem);
         menu.Items.Add(configItem);
         menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(_startupToggleItem);
         menu.Items.Add(_glowToggleItem);
         menu.Items.Add(_acrylicToggleItem);
         menu.Items.Add(new MenuFlyoutSeparator());

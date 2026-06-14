@@ -14,7 +14,7 @@ This app provides:
 - Multi-provider profile support through separate `CODEX_HOME` / `CLAUDE_CONFIG_DIR` directories.
 - Codex account discovery through `codex app-server`.
 - Codex login per isolated profile through app-server browser auth.
-- Settings controls for profile creation, rename, enable/disable, folder open, and refresh config.
+- Settings controls for startup, profile creation, rename, enable/disable, folder open, and refresh config.
 - Claude usage through configured Claude CLI credential directories.
 - Local token and USD cost summaries from Codex and Claude session logs.
 - Local config at `%APPDATA%\Fluent AgentBar\config.json`.
@@ -54,7 +54,7 @@ Run the full WinUI verification baseline with:
 .\winui\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\FluentAgentBar.exe
 ```
 
-The app starts in the background and creates a compact usage widget for each detected Windows taskbar. Left-click any widget to open the shared usage flyout. Right-click a widget for a context menu with Refresh now, Settings, Open config file, quick toggles (widget glow, acrylic flyout), and Exit. Launching the executable again focuses the existing instance's Settings window. Use `--show-settings` to show Settings explicitly, or `--show-flyout` to show the usage flyout.
+The app starts in the background and creates a compact usage widget for each detected Windows taskbar. Left-click any widget to open the shared usage flyout. Right-click a widget for a context menu with Refresh now, Settings, Open config file, quick toggles (start with Windows, widget glow, acrylic flyout), and Exit. Launching the executable again focuses the existing instance's Settings window. Use `--show-settings` to show Settings explicitly, or `--show-flyout` to show the usage flyout.
 
 ## Multi-provider Profiles
 
