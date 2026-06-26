@@ -14,10 +14,19 @@ This app provides:
 - Multi-provider profile support through separate `CODEX_HOME` / `CLAUDE_CONFIG_DIR` directories.
 - Codex account discovery through `codex app-server`.
 - Codex login per isolated profile through app-server browser auth.
+- One-click Codex account switching from the flyout or taskbar context menu, with Codex force-close and reopen flow.
 - Settings controls for startup, profile creation, rename, enable/disable, folder open, and refresh config.
 - Claude usage through configured Claude CLI credential directories.
 - Local token and USD cost summaries from Codex and Claude session logs.
 - Local config at `%APPDATA%\Fluent AgentBar\config.json`.
+
+## Screenshots
+
+![Fluent AgentBar flyout and taskbar widget](docs/images/fluent-agentbar-flyout-widget.png)
+
+![Fluent AgentBar settings](docs/images/fluent-agentbar-settings.png)
+
+![Fluent AgentBar taskbar context menu](docs/images/fluent-agentbar-taskbar-menu.png)
 
 On first run, Fluent AgentBar may copy a legacy config from
 `%APPDATA%\Codex SWBar Windows\config.json` when the current config file does
@@ -54,7 +63,7 @@ Run the full WinUI verification baseline with:
 .\winui\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\FluentAgentBar.exe
 ```
 
-The app starts in the background and creates a compact usage widget for each detected Windows taskbar. Left-click any widget to open the shared usage flyout. Right-click a widget for a context menu with Refresh now, Settings, Open config file, quick toggles (start with Windows, widget glow, acrylic flyout), and Exit. Launching the executable again focuses the existing instance's Settings window. Use `--show-settings` to show Settings explicitly, or `--show-flyout` to show the usage flyout.
+The app starts in the background and creates a compact usage widget for each detected Windows taskbar. Left-click any widget to open the shared usage flyout. Right-click a widget for a context menu with Refresh now, Switch Codex account, Settings, Open config file, quick toggles (start with Windows, widget glow, acrylic flyout), and Exit. Launching the executable again focuses the existing instance's Settings window. Use `--show-settings` to show Settings explicitly, or `--show-flyout` to show the usage flyout.
 
 ## Multi-provider Profiles
 
@@ -98,6 +107,11 @@ Use the profile card `Login` button to authenticate a profile. The app keeps
 Codex credentials in that profile's `CODEX_HOME`, so it does not log out or
 modify your normal `%USERPROFILE%\.codex` session. Claude login runs
 `claude /login` with the profile's `CLAUDE_CONFIG_DIR`.
+
+Use `Switch` in the flyout, or `Switch Codex account` from the taskbar context
+menu, to promote a signed-in Codex profile into `%USERPROFILE%\.codex`. AgentBar
+closes running Codex app sessions first and reopens Codex after the switch so
+the desktop app picks up the new account.
 
 ## Current Limitations
 

@@ -35,9 +35,6 @@ public sealed partial class TaskbarWidgetWindow : Window
     private bool _anchored;
     private bool _targetLostReported;
     private MenuFlyout? _contextMenu;
-    private ToggleMenuFlyoutItem? _glowToggleItem;
-    private ToggleMenuFlyoutItem? _acrylicToggleItem;
-    private ToggleMenuFlyoutItem? _startupToggleItem;
 
     public event EventHandler? UsageRequested;
     public event EventHandler? ExitRequested;
@@ -454,12 +451,8 @@ public sealed partial class TaskbarWidgetWindow : Window
 
     private void ShowContextMenu(NativeMethods.Point cursor, NativeMethods.Rect rect)
     {
-        _contextMenu ??= CreateContextMenu();
-
         AppConfig config = AppConfigStore.Load();
-        _glowToggleItem!.IsChecked = config.WidgetGlowEnabled;
-        _acrylicToggleItem!.IsChecked = string.Equals(config.FlyoutStyle, "acrylic", StringComparison.OrdinalIgnoreCase);
-        _startupToggleItem!.IsChecked = WindowsStartupService.IsEnabled();
+        _contextMenu = CreateContextMenu(config);
 
         double scale = Math.Max(1.0, Shell.XamlRoot?.RasterizationScale ?? 1.0);
         _contextMenu.ShowAt(Shell, new FlyoutShowOptions
@@ -471,61 +464,142 @@ public sealed partial class TaskbarWidgetWindow : Window
         });
     }
 
-    private MenuFlyout CreateContextMenu()
+    private MenuFlyout CreateContextMenu(AppConfig config)
     {
         MenuFlyout menu = new();
 
-        MenuFlyoutItem refreshItem = new() { Text = "Refresh now", Icon = new FontIcon { Glyph = "" } };
+        MenuFlyoutItem refreshItem = new() { Text = "Refresh now", Icon = new FontIcon { Glyph = "\uE72C" } };
         refreshItem.Click += (_, _) => _ = _usageService.FetchAsync();
 
-        MenuFlyoutItem settingsItem = new() { Text = "Settings", Icon = new FontIcon { Glyph = "" } };
+        MenuFlyoutSubItem switchItem = CreateCodexSwitchMenu(config);
+
+        MenuFlyoutItem settingsItem = new() { Text = "Settings", Icon = new FontIcon { Glyph = "\uE713" } };
         settingsItem.Click += (_, _) => SettingsWindow.ShowInstance();
 
-        MenuFlyoutItem configItem = new() { Text = "Open config file", Icon = new FontIcon { Glyph = "" } };
+        MenuFlyoutItem configItem = new() { Text = "Open config file", Icon = new FontIcon { Glyph = "\uE8A5" } };
         configItem.Click += OnOpenConfigClick;
 
-        _glowToggleItem = new ToggleMenuFlyoutItem { Text = "Widget glow" };
-        _glowToggleItem.Click += (_, _) =>
+        MenuFlyoutItem startupItem = CreateCheckedMenuItem("Start with Windows", WindowsStartupService.IsEnabled());
+        startupItem.Click += (_, _) =>
         {
-            AppConfig config = AppConfigStore.Load();
-            config.WidgetGlowEnabled = !config.WidgetGlowEnabled;
-            AppConfigStore.Save(config);
-        };
-
-        _startupToggleItem = new ToggleMenuFlyoutItem { Text = "Start with Windows" };
-        _startupToggleItem.Click += (_, _) =>
-        {
-            bool requested = _startupToggleItem.IsChecked;
+            bool requested = !WindowsStartupService.IsEnabled();
             if (!WindowsStartupService.TrySetEnabled(requested, out string errorMessage))
             {
-                _startupToggleItem.IsChecked = WindowsStartupService.IsEnabled();
                 System.Diagnostics.Debug.WriteLine(errorMessage);
             }
         };
 
-        _acrylicToggleItem = new ToggleMenuFlyoutItem { Text = "Acrylic flyout" };
-        _acrylicToggleItem.Click += (_, _) =>
+        MenuFlyoutItem glowItem = CreateCheckedMenuItem("Widget glow", config.WidgetGlowEnabled);
+        glowItem.Click += (_, _) =>
         {
-            AppConfig config = AppConfigStore.Load();
-            config.FlyoutStyle = string.Equals(config.FlyoutStyle, "acrylic", StringComparison.OrdinalIgnoreCase)
-                ? "solid"
-                : "acrylic";
-            AppConfigStore.Save(config);
+            AppConfig current = AppConfigStore.Load();
+            current.WidgetGlowEnabled = !current.WidgetGlowEnabled;
+            AppConfigStore.Save(current);
         };
 
-        MenuFlyoutItem exitItem = new() { Text = "Exit", Icon = new FontIcon { Glyph = "" } };
+        MenuFlyoutItem acrylicItem = CreateCheckedMenuItem(
+            "Acrylic flyout",
+            string.Equals(config.FlyoutStyle, "acrylic", StringComparison.OrdinalIgnoreCase));
+        acrylicItem.Click += (_, _) =>
+        {
+            AppConfig current = AppConfigStore.Load();
+            current.FlyoutStyle = string.Equals(current.FlyoutStyle, "acrylic", StringComparison.OrdinalIgnoreCase)
+                ? "solid"
+                : "acrylic";
+            AppConfigStore.Save(current);
+        };
+
+        MenuFlyoutItem exitItem = new() { Text = "Exit", Icon = new FontIcon { Glyph = "\uE8BB" } };
         exitItem.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
 
         menu.Items.Add(refreshItem);
+        menu.Items.Add(switchItem);
         menu.Items.Add(settingsItem);
         menu.Items.Add(configItem);
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(_startupToggleItem);
-        menu.Items.Add(_glowToggleItem);
-        menu.Items.Add(_acrylicToggleItem);
+        menu.Items.Add(startupItem);
+        menu.Items.Add(glowItem);
+        menu.Items.Add(acrylicItem);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(exitItem);
         return menu;
+    }
+
+    private static MenuFlyoutItem CreateCheckedMenuItem(string text, bool isChecked)
+    {
+        return new MenuFlyoutItem
+        {
+            Text = text,
+            Icon = new FontIcon
+            {
+                Glyph = "\uE73E",
+                Opacity = isChecked ? 1 : 0
+            }
+        };
+    }
+
+    private MenuFlyoutSubItem CreateCodexSwitchMenu(AppConfig config)
+    {
+        MenuFlyoutSubItem switchItem = new()
+        {
+            Text = "Switch Codex account",
+            Icon = new FontIcon { Glyph = "\uE8AB" }
+        };
+
+        List<ProfileConfig> profiles = config.Profiles
+            .Where(profile => AppConfigStore.IsProvider(profile, "codex") && profile.Enabled)
+            .ToList();
+
+        if (profiles.Count == 0)
+        {
+            switchItem.Items.Add(new MenuFlyoutItem
+            {
+                Text = "No enabled Codex profiles",
+                IsEnabled = false
+            });
+            return switchItem;
+        }
+
+        foreach (ProfileConfig profile in profiles)
+        {
+            bool hasAuth = CodexAccountSwitchService.HasProfileAuth(profile);
+            bool active = hasAuth && CodexAccountSwitchService.IsActiveProfile(profile);
+            ProfileConfig menuProfile = new()
+            {
+                Provider = profile.Provider,
+                Label = profile.Label,
+                Home = profile.Home,
+                Enabled = profile.Enabled
+            };
+
+            MenuFlyoutItem profileItem = new()
+            {
+                Text = active
+                    ? $"{profile.Label} (active)"
+                    : hasAuth
+                        ? profile.Label
+                        : $"{profile.Label} (login needed)",
+                Icon = new FontIcon { Glyph = active ? "\uE73E" : "\uE8AB" },
+                IsEnabled = hasAuth && !active
+            };
+            profileItem.Click += async (_, _) => await SwitchCodexProfileFromMenuAsync(menuProfile);
+            switchItem.Items.Add(profileItem);
+        }
+
+        return switchItem;
+    }
+
+    private async Task SwitchCodexProfileFromMenuAsync(ProfileConfig profile)
+    {
+        try
+        {
+            await CodexAccountSwitchService.SwitchToProfileAsync(profile);
+            await _usageService.FetchAsync();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
     }
 
     private void OnOpenConfigClick(object sender, RoutedEventArgs e)

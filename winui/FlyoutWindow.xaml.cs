@@ -2,6 +2,7 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -33,10 +34,14 @@ public sealed partial class FlyoutWindow : Window
     private RectInt32 _resizeFrom;
     private RectInt32 _resizeTarget;
     private DateTimeOffset _resizeAnimationStart;
+    private bool _isSwitchingCodexProfile;
 
     public IReadOnlyList<ProviderUsage> Providers { get; private set; } = MockUsageData.CreateProviders();
     public string LastRefreshText { get; private set; } = "Last refresh --";
     public string IntervalText { get; private set; } = "Refresh interval 5 min";
+    public string CodexSwitchStatusText { get; private set; } = string.Empty;
+    public Visibility CodexSwitchStatusVisibility =>
+        string.IsNullOrWhiteSpace(CodexSwitchStatusText) ? Visibility.Collapsed : Visibility.Visible;
 
     public FlyoutWindow(UsageService usageService)
     {
@@ -89,6 +94,7 @@ public sealed partial class FlyoutWindow : Window
     public void ShowNoActivate()
     {
         RefreshConfigBindings();
+        SetCodexSwitchStatus(string.Empty, animate: false);
         _isClosing = false;
         _mouseWasDown = true;
         _shownAt = DateTimeOffset.Now;
@@ -562,5 +568,59 @@ public sealed partial class FlyoutWindow : Window
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
         SettingsWindow.ShowInstance();
+    }
+
+    private async void OnCodexSwitchClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: ProfileUsage profile } ||
+            !profile.CanSwitchCodexAccount ||
+            _isSwitchingCodexProfile)
+        {
+            return;
+        }
+
+        await SwitchCodexProfileAsync(profile);
+    }
+
+    private async Task SwitchCodexProfileAsync(ProfileUsage profile)
+    {
+        _isSwitchingCodexProfile = true;
+        SetCodexSwitchStatus($"Switching Codex to \"{profile.Label}\"...", animate: true);
+
+        try
+        {
+            ProfileConfig profileConfig = new()
+            {
+                Provider = "codex",
+                Label = profile.Label,
+                Home = profile.Home,
+                Enabled = true
+            };
+
+            CodexAccountSwitchResult result = await CodexAccountSwitchService.SwitchToProfileAsync(profileConfig);
+            string processText = result.TargetedProcessCount > 0
+                ? $" Closed {result.ClosedProcessCount} Codex session{(result.ClosedProcessCount == 1 ? string.Empty : "s")}."
+                : string.Empty;
+            string openText = result.CodexOpened
+                ? " Codex reopened."
+                : $" Codex account switched, but reopen failed: {result.OpenError}";
+            SetCodexSwitchStatus($"Switched to \"{result.ProfileLabel}\".{processText}{openText}", animate: true);
+            await _usageService.FetchAsync();
+        }
+        catch (Exception ex)
+        {
+            SetCodexSwitchStatus($"Codex switch failed: {ex.Message}", animate: true);
+        }
+        finally
+        {
+            _isSwitchingCodexProfile = false;
+        }
+    }
+
+    private void SetCodexSwitchStatus(string text, bool animate)
+    {
+        CodexSwitchStatusText = text;
+        Bindings.Update();
+        UpdateFlyoutHeight(animate);
     }
 }

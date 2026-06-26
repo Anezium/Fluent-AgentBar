@@ -75,6 +75,13 @@
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{ThemeResource CaptionTextBlockStyle}"
                             Text="{x:Bind LastRefreshText}" />
+                        <TextBlock
+                            Margin="0,4,0,0"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Text="{x:Bind CodexSwitchStatusText}"
+                            TextWrapping="Wrap"
+                            Visibility="{x:Bind CodexSwitchStatusVisibility}" />
                     </StackPanel>
 
                     <TextBlock
@@ -215,7 +222,7 @@
                                             <ItemsRepeater.ItemTemplate>
                                                 <DataTemplate x:DataType="local:ProfileUsage">
                                                     <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
-                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                                                             <TextBlock
                                                                 Style="{ThemeResource BodyTextBlockStyle}"
                                                                 Text="{x:Bind Label}" />
@@ -225,6 +232,28 @@
                                                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                                 Style="{ThemeResource CaptionTextBlockStyle}"
                                                                 Text="{x:Bind DetailText}" />
+                                                            <Button
+                                                                Grid.Column="2"
+                                                                MinWidth="68"
+                                                                Height="28"
+                                                                Padding="8,2"
+                                                                Click="OnCodexSwitchClick"
+                                                                IsEnabled="{x:Bind CanSwitchCodexAccount}"
+                                                                Tag="{x:Bind}"
+                                                                ToolTipService.ToolTip="{x:Bind CodexSwitchTooltip}"
+                                                                Visibility="{x:Bind CodexSwitchVisibility}">
+                                                                <StackPanel
+                                                                    HorizontalAlignment="Center"
+                                                                    Orientation="Horizontal"
+                                                                    Spacing="6">
+                                                                    <FontIcon
+                                                                        FontSize="12"
+                                                                        Glyph="{x:Bind CodexSwitchGlyph}" />
+                                                                    <TextBlock
+                                                                        Style="{ThemeResource CaptionTextBlockStyle}"
+                                                                        Text="{x:Bind CodexSwitchText}" />
+                                                                </StackPanel>
+                                                            </Button>
                                                         </Grid>
                                                         <Grid
                                                             Grid.Row="1"

@@ -178,12 +178,26 @@ public sealed record ProfileUsage(
     bool IsAvailable,
     Color AccentColor)
 {
+    public string Provider { get; init; } = "codex";
+    public string Home { get; init; } = string.Empty;
+    public bool HasCodexAuth { get; init; }
+    public bool IsActiveCodexAccount { get; init; }
     public DateTimeOffset? PrimaryResetAt { get; init; }
     public DateTimeOffset? WeeklyResetAt { get; init; }
 
     public string RemainingText => IsAvailable ? $"{Math.Clamp(RemainingPercent, 0, 100)}%" : "--";
     public string WeeklyText => IsAvailable ? $"{Math.Clamp(WeeklyPercent, 0, 100)}%" : "--";
     public Brush AccentBrush => new SolidColorBrush(AccentColor);
+    public bool IsCodexProfile => AppConfigStore.NormalizeProvider(Provider) == "codex";
+    public bool CanSwitchCodexAccount => IsCodexProfile && HasCodexAuth && !IsActiveCodexAccount;
+    public Visibility CodexSwitchVisibility => IsCodexProfile && HasCodexAuth
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+    public string CodexSwitchText => IsActiveCodexAccount ? "Active" : "Switch";
+    public string CodexSwitchGlyph => IsActiveCodexAccount ? "\uE73E" : "\uE8AB";
+    public string CodexSwitchTooltip => IsActiveCodexAccount
+        ? "This Codex account is active"
+        : $"Switch Codex to {Label}";
 
     public string ResetsText
     {
@@ -269,12 +283,24 @@ internal static class MockUsageData
                 AppConfigStore.IsProvider(profile, "codex") && profile.Enabled)
             ?? config.Profiles.FirstOrDefault(profile => AppConfigStore.IsProvider(profile, "codex"))
             ?? config.Profiles.First();
-        return new ProfileUsage(profile.Label, string.Empty, "Pro", 72, 54, true, CodexAccentColor);
+        return new ProfileUsage(profile.Label, string.Empty, "Pro", 72, 54, true, CodexAccentColor)
+        {
+            Provider = profile.Provider,
+            Home = profile.Home,
+            HasCodexAuth = CodexAccountSwitchService.HasProfileAuth(profile),
+            IsActiveCodexAccount = CodexAccountSwitchService.IsActiveProfile(profile)
+        };
     }
 
     public static ProfileUsage CreateUnavailableProfile(ProfileConfig profile)
     {
-        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, CodexAccentColor);
+        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, CodexAccentColor)
+        {
+            Provider = profile.Provider,
+            Home = profile.Home,
+            HasCodexAuth = CodexAccountSwitchService.HasProfileAuth(profile),
+            IsActiveCodexAccount = CodexAccountSwitchService.IsActiveProfile(profile)
+        };
     }
 
     public static IReadOnlyList<ProviderUsage> CreateProviders(AppConfig config)
@@ -288,7 +314,13 @@ internal static class MockUsageData
                 index == 0 ? 72 : 43,
                 index == 0 ? 54 : 61,
                 true,
-                CodexAccentColor))
+                CodexAccentColor)
+            {
+                Provider = profile.Provider,
+                Home = profile.Home,
+                HasCodexAuth = CodexAccountSwitchService.HasProfileAuth(profile),
+                IsActiveCodexAccount = CodexAccountSwitchService.IsActiveProfile(profile)
+            })
             .ToList();
         if (codexProfiles.Count == 0)
         {
@@ -304,7 +336,9 @@ internal static class MockUsageData
             .Where(profile => AppConfigStore.IsProvider(profile, "claude") && profile.Enabled)
             .Select(profile => new ProfileUsage("Personal", string.Empty, "Pro", 88, 76, true, ClaudeAccentColor) with
             {
-                Label = profile.Label
+                Label = profile.Label,
+                Provider = profile.Provider,
+                Home = profile.Home
             })
             .ToList();
 

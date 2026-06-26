@@ -328,7 +328,12 @@ public sealed class UsageService : IDisposable
     private async Task<ProfileUsage> FetchClaudeProfileAsync(ProfileConfig profile, CancellationToken cancellationToken)
     {
         ProfileUsage usage = await _claudeUsageService.FetchAsync(profile.Home, cancellationToken);
-        return usage with { Label = profile.Label };
+        return usage with
+        {
+            Label = profile.Label,
+            Provider = profile.Provider,
+            Home = profile.Home
+        };
     }
 
     private static ProcessStartInfo CreateCodexAppServerStartInfo(string codexHome)
@@ -514,6 +519,10 @@ public sealed class UsageService : IDisposable
             available,
             MockUsageData.CodexAccentColor)
         {
+            Provider = profile.Provider,
+            Home = profile.Home,
+            HasCodexAuth = CodexAccountSwitchService.HasProfileAuth(profile),
+            IsActiveCodexAccount = CodexAccountSwitchService.IsActiveProfile(profile),
             PrimaryResetAt = primaryResetAt,
             WeeklyResetAt = weeklyResetAt
         };
@@ -694,7 +703,15 @@ public sealed class UsageService : IDisposable
 
     private static ProfileUsage Unavailable(ProfileConfig profile, Windows.UI.Color accentColor)
     {
-        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, accentColor);
+        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, accentColor)
+        {
+            Provider = profile.Provider,
+            Home = profile.Home,
+            HasCodexAuth = AppConfigStore.IsProvider(profile, "codex") &&
+                CodexAccountSwitchService.HasProfileAuth(profile),
+            IsActiveCodexAccount = AppConfigStore.IsProvider(profile, "codex") &&
+                CodexAccountSwitchService.IsActiveProfile(profile)
+        };
     }
 
     private void RegisterProcess(Process process)
