@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Xunit;
 
@@ -46,6 +47,46 @@ public sealed class TokenStatsTests
         Assert.Equal(11.375, today.CostUsd, precision: 3);
     }
 
+    [Theory]
+    [InlineData("claude-fable-5", "2026-07-04", 73.50)]
+    [InlineData("claude-fable-5-20260609", "2026-07-04", 73.50)]
+    [InlineData("claude-sonnet-5", "2026-07-04", 14.70)]
+    [InlineData("claude-sonnet-5", "2026-09-01", 22.05)]
+    [InlineData("claude-sonnet-5-20260630", "2026-09-01", 22.05)]
+    public async Task ComputeAsync_PricesCurrentClaudeModelsFromLineDate(
+        string model,
+        string usageDateText,
+        double expectedCost)
+    {
+        using TemporaryDirectory temp = new();
+        DateTimeOffset usageTimestamp = new(
+            DateTime.Parse(usageDateText, CultureInfo.InvariantCulture),
+            TimeSpan.Zero);
+        string jsonlPath = CreateClaudeJsonl(
+            temp.Path,
+            model,
+            inputTokens: 1_000_000,
+            outputTokens: 1_000_000,
+            cacheReadTokens: 1_000_000,
+            cacheCreationTokens: 1_000_000,
+            usageTimestamp);
+        File.SetLastWriteTime(jsonlPath, usageTimestamp.DateTime);
+
+        (TokenReport? codex, TokenReport? claude) = await new TokenStatsService().ComputeAsync(
+            CreateClaudeOnlyConfig(temp.Path),
+            includeDefaultCodexHome: false,
+            today: usageTimestamp.Date);
+
+        Assert.Null(codex);
+        Assert.NotNull(claude?.Today);
+        TokenStats today = claude.Today;
+        Assert.Equal(1_000_000, today.InputTokens);
+        Assert.Equal(1_000_000, today.OutputTokens);
+        Assert.Equal(1_000_000, today.CacheReadTokens);
+        Assert.Equal(1_000_000, today.CacheCreationTokens);
+        Assert.Equal(expectedCost, today.CostUsd, precision: 3);
+    }
+
     [Fact]
     public async Task ComputeAsync_ReturnsZeroCostForUnknownModel()
     {
@@ -91,14 +132,16 @@ public sealed class TokenStatsTests
         long inputTokens,
         long outputTokens,
         long cacheReadTokens,
-        long cacheCreationTokens)
+        long cacheCreationTokens,
+        DateTimeOffset? timestamp = null)
     {
         string projects = Path.Combine(claudeHome, "projects", "temp-project");
         Directory.CreateDirectory(projects);
         string jsonlPath = Path.Combine(projects, "session.jsonl");
+        DateTimeOffset lineTimestamp = timestamp ?? DateTimeOffset.Now;
         object line = new
         {
-            timestamp = DateTimeOffset.Now.ToString("O"),
+            timestamp = lineTimestamp.ToString("O"),
             message = new
             {
                 id = Guid.NewGuid().ToString("N"),

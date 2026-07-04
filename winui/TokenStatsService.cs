@@ -55,13 +55,16 @@ internal sealed class TokenStatsService
 {
     private const int HistoryDays = 7;
 
-    // Source to refresh from:
+    // Sources to refresh from:
+    // https://platform.claude.com/docs/en/about-claude/pricing
     // https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
     private static readonly ModelPricing[] PricingTable =
     [
-        new("claude-fable-5", 5.00, 25.00, 0.50, 6.25),
-        new("claude-mythos-5", 5.00, 25.00, 0.50, 6.25),
+        new("claude-fable-5", 10.00, 50.00, 1.00, 12.50),
+        new("claude-mythos-5", 10.00, 50.00, 1.00, 12.50),
         new("claude-opus-4", 5.00, 25.00, 0.50, 6.25),
+        new("claude-sonnet-5", 2.00, 10.00, 0.20, 2.50, EffectiveThrough: new DateTime(2026, 8, 31)),
+        new("claude-sonnet-5", 3.00, 15.00, 0.30, 3.75, EffectiveFrom: new DateTime(2026, 9, 1)),
         new("claude-sonnet-4", 3.00, 15.00, 0.30, 3.75),
         new("claude-haiku-4", 1.00, 5.00, 0.10, 1.25),
         new("gpt-5.5", 5.00, 30.00, 0.50, 0),
@@ -81,16 +84,18 @@ internal sealed class TokenStatsService
 
     internal Task<(TokenReport? codex, TokenReport? claude)> ComputeAsync(
         AppConfig config,
-        bool includeDefaultCodexHome)
+        bool includeDefaultCodexHome,
+        DateTime? today = null)
     {
         return Task.Run(() =>
         {
             TokenReport? codex = null;
             TokenReport? claude = null;
+            DateTime reportToday = (today ?? DateTime.Today).Date;
 
             try
             {
-                codex = ComputeCodex(config, includeDefaultCodexHome);
+                codex = ComputeCodex(config, includeDefaultCodexHome, reportToday);
             }
             catch (Exception ex)
             {
@@ -99,7 +104,7 @@ internal sealed class TokenStatsService
 
             try
             {
-                claude = ComputeClaude(config);
+                claude = ComputeClaude(config, reportToday);
             }
             catch (Exception ex)
             {
@@ -110,9 +115,8 @@ internal sealed class TokenStatsService
         });
     }
 
-    private static TokenReport? ComputeCodex(AppConfig config, bool includeDefaultCodexHome)
+    private static TokenReport? ComputeCodex(AppConfig config, bool includeDefaultCodexHome, DateTime today)
     {
-        DateTime today = DateTime.Today;
         DateTime minDay = today.AddDays(-(HistoryDays - 1));
         Dictionary<DateTime, TokenAccumulator> buckets = [];
         HashSet<string> codexHomes = new(StringComparer.OrdinalIgnoreCase);
@@ -141,9 +145,8 @@ internal sealed class TokenStatsService
         return ToReport(buckets, minDay, today);
     }
 
-    private static TokenReport? ComputeClaude(AppConfig config)
+    private static TokenReport? ComputeClaude(AppConfig config, DateTime today)
     {
-        DateTime today = DateTime.Today;
         DateTime minDay = today.AddDays(-(HistoryDays - 1));
         Dictionary<DateTime, TokenAccumulator> buckets = [];
         HashSet<string> seenMessages = new(StringComparer.Ordinal);
@@ -316,7 +319,7 @@ internal sealed class TokenStatsService
 
                     if (inWindow)
                     {
-                        AddToBucket(buckets, day, delta with { CostUsd = CalculateCost(delta, currentModel) });
+                        AddToBucket(buckets, day, delta with { CostUsd = CalculateCost(delta, currentModel, day) });
                     }
                 }
                 else if (inWindow)
@@ -524,7 +527,8 @@ internal sealed class TokenStatsService
                 outputTokens,
                 cacheReadTokens,
                 cacheCreationTokens,
-                model);
+                model,
+                day);
 
             usage = new TokenStats(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd);
             return true;
@@ -724,14 +728,15 @@ internal sealed class TokenStatsService
             Math.Max(0, current.CacheCreationTokens - previous.CacheCreationTokens));
     }
 
-    private static double CalculateCost(TokenStats usage, string? model)
+    private static double CalculateCost(TokenStats usage, string? model, DateTime? usageDay = null)
     {
         return CalculateCost(
             usage.InputTokens,
             usage.OutputTokens,
             usage.CacheReadTokens,
             usage.CacheCreationTokens,
-            model);
+            model,
+            usageDay);
     }
 
     private static double CalculateCost(
@@ -739,9 +744,10 @@ internal sealed class TokenStatsService
         long outputTokens,
         long cacheReadTokens,
         long cacheCreationTokens,
-        string? model)
+        string? model,
+        DateTime? usageDay = null)
     {
-        if (!TryGetPricing(model, out ModelPricing? pricing))
+        if (!TryGetPricing(model, usageDay ?? DateTime.Today, out ModelPricing? pricing))
         {
             return 0;
         }
@@ -753,7 +759,7 @@ internal sealed class TokenStatsService
                 (cacheCreationTokens * modelPricing.CacheWrite)) / 1_000_000.0;
     }
 
-    private static bool TryGetPricing(string? model, out ModelPricing? pricing)
+    private static bool TryGetPricing(string? model, DateTime usageDay, out ModelPricing? pricing)
     {
         string normalizedModel = NormalizeModelName(model);
         if (normalizedModel.Length == 0)
@@ -764,7 +770,8 @@ internal sealed class TokenStatsService
 
         foreach (ModelPricing candidate in PricingTable)
         {
-            if (normalizedModel.StartsWith(candidate.Prefix, StringComparison.Ordinal))
+            if (normalizedModel.StartsWith(candidate.Prefix, StringComparison.Ordinal) &&
+                candidate.AppliesOn(usageDay.Date))
             {
                 pricing = candidate;
                 return true;
@@ -841,7 +848,16 @@ internal sealed class TokenStatsService
         double Input,
         double Output,
         double CacheRead,
-        double CacheWrite);
+        double CacheWrite,
+        DateTime? EffectiveFrom = null,
+        DateTime? EffectiveThrough = null)
+    {
+        public bool AppliesOn(DateTime day)
+        {
+            return (EffectiveFrom is null || day >= EffectiveFrom.Value.Date) &&
+                (EffectiveThrough is null || day <= EffectiveThrough.Value.Date);
+        }
+    }
 
     private sealed class TokenAccumulator
     {

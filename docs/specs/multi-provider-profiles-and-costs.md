@@ -69,8 +69,10 @@ Extend token scanning with per-model cost:
 
   | prefix | in | out | cacheRead | cacheWrite |
   |---|---|---|---|---|
-  | `claude-fable-5`, `claude-mythos-5` | 5.00 | 25.00 | 0.50 | 6.25 |
+  | `claude-fable-5`, `claude-mythos-5` | 10.00 | 50.00 | 1.00 | 12.50 |
   | `claude-opus-4` | 5.00 | 25.00 | 0.50 | 6.25 |
+  | `claude-sonnet-5` through 2026-08-31 | 2.00 | 10.00 | 0.20 | 2.50 |
+  | `claude-sonnet-5` from 2026-09-01 | 3.00 | 15.00 | 0.30 | 3.75 |
   | `claude-sonnet-4` | 3.00 | 15.00 | 0.30 | 3.75 |
   | `claude-haiku-4` | 1.00 | 5.00 | 0.10 | 1.25 |
   | `gpt-5.5`, `gpt-5-5` | 5.00 | 30.00 | 0.50 | 0 |
