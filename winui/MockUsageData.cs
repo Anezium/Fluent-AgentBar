@@ -169,6 +169,51 @@ public sealed record HistoryBar(
     double BarOpacity,
     Windows.UI.Text.FontWeight LabelWeight);
 
+public sealed record QuotaWindowUsage(
+    string Label,
+    int RemainingPercent,
+    bool IsAvailable,
+    DateTimeOffset? ResetAt,
+    Color AccentColor)
+{
+    public string RemainingText => IsAvailable ? $"{Math.Clamp(RemainingPercent, 0, 100)}%" : "--";
+    public Brush AccentBrush => new SolidColorBrush(AccentColor);
+}
+
+public sealed record QuotaGroupUsage(
+    string Name,
+    IReadOnlyList<QuotaWindowUsage> Windows)
+{
+    public Visibility NameVisibility => string.IsNullOrWhiteSpace(Name)
+        ? Visibility.Collapsed
+        : Visibility.Visible;
+
+    public string ResetsText
+    {
+        get
+        {
+            List<string> parts = Windows
+                .Where(window => window.ResetAt.HasValue)
+                .Select(window => $"{window.Label} {FormatReset(window.ResetAt!.Value)}")
+                .ToList();
+            return parts.Count == 0 ? string.Empty : "Resets · " + string.Join(" · ", parts);
+        }
+    }
+
+    public Visibility ResetsVisibility => ResetsText.Length > 0
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    private static string FormatReset(DateTimeOffset resetAt)
+    {
+        DateTime local = resetAt.LocalDateTime;
+        string time = local.ToString("HH:mm", CultureInfo.CurrentCulture);
+        return local.Date == DateTime.Today
+            ? time
+            : $"{local.ToString("ddd", CultureInfo.CurrentCulture).TrimEnd('.')} {time}";
+    }
+}
+
 public sealed record ProfileUsage(
     string Label,
     string Email,
@@ -184,9 +229,18 @@ public sealed record ProfileUsage(
     public bool IsActiveCodexAccount { get; init; }
     public DateTimeOffset? PrimaryResetAt { get; init; }
     public DateTimeOffset? WeeklyResetAt { get; init; }
+    public bool HasPrimaryQuota { get; init; } = true;
+    public bool HasWeeklyQuota { get; init; } = true;
+    public string PrimaryQuotaLabel { get; init; } = "5h";
+    public string WeeklyQuotaLabel { get; init; } = "Weekly";
+    public IReadOnlyList<QuotaGroupUsage>? QuotaGroups { get; init; }
 
-    public string RemainingText => IsAvailable ? $"{Math.Clamp(RemainingPercent, 0, 100)}%" : "--";
-    public string WeeklyText => IsAvailable ? $"{Math.Clamp(WeeklyPercent, 0, 100)}%" : "--";
+    public string RemainingText => IsAvailable && HasPrimaryQuota
+        ? $"{Math.Clamp(RemainingPercent, 0, 100)}%"
+        : "--";
+    public string WeeklyText => IsAvailable && HasWeeklyQuota
+        ? $"{Math.Clamp(WeeklyPercent, 0, 100)}%"
+        : "--";
     public Brush AccentBrush => new SolidColorBrush(AccentColor);
     public bool IsCodexProfile => AppConfigStore.NormalizeProvider(Provider) == "codex";
     public bool CanSwitchCodexAccount => IsCodexProfile && HasCodexAuth && !IsActiveCodexAccount;
@@ -198,6 +252,40 @@ public sealed record ProfileUsage(
     public string CodexSwitchTooltip => IsActiveCodexAccount
         ? "This Codex account is active"
         : $"Switch Codex to {Label}";
+
+    public IReadOnlyList<QuotaGroupUsage> DisplayQuotaGroups
+    {
+        get
+        {
+            if (QuotaGroups is { Count: > 0 })
+            {
+                return QuotaGroups;
+            }
+
+            List<QuotaWindowUsage> windows = [];
+            if (HasPrimaryQuota)
+            {
+                windows.Add(new QuotaWindowUsage(
+                    PrimaryQuotaLabel,
+                    RemainingPercent,
+                    IsAvailable,
+                    PrimaryResetAt,
+                    AccentColor));
+            }
+
+            if (HasWeeklyQuota)
+            {
+                windows.Add(new QuotaWindowUsage(
+                    WeeklyQuotaLabel,
+                    WeeklyPercent,
+                    IsAvailable,
+                    WeeklyResetAt,
+                    AccentColor));
+            }
+
+            return [new QuotaGroupUsage(string.Empty, windows)];
+        }
+    }
 
     public string ResetsText
     {

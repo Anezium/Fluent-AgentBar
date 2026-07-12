@@ -44,7 +44,8 @@
 
             <Grid
                 Grid.Column="2"
-                RowDefinitions="*,*"
+                VerticalAlignment="Center"
+                RowDefinitions="Auto,Auto"
                 RowSpacing="3">
                 <Grid ColumnDefinitions="22,*,34" ColumnSpacing="8">
                     <TextBlock
@@ -82,7 +83,8 @@
                 <Grid
                     Grid.Row="1"
                     ColumnDefinitions="22,*,34"
-                    ColumnSpacing="8">
+                    ColumnSpacing="8"
+                    Visibility="{x:Bind WeeklyQuotaVisibility}">
                     <TextBlock
                         FontSize="11"
                         VerticalAlignment="Center"

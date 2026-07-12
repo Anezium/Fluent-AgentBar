@@ -35,6 +35,8 @@ public sealed partial class FlyoutWindow : Window
     private RectInt32 _resizeTarget;
     private DateTimeOffset _resizeAnimationStart;
     private bool _isSwitchingCodexProfile;
+    private bool _heightUpdatePending;
+    private bool _pendingHeightAnimation;
 
     public IReadOnlyList<ProviderUsage> Providers { get; private set; } = MockUsageData.CreateProviders();
     public string LastRefreshText { get; private set; } = "Last refresh --";
@@ -73,7 +75,7 @@ public sealed partial class FlyoutWindow : Window
         ConfigureNativeWindow();
 
         Shell.KeyDown += OnShellKeyDown;
-        Shell.Loaded += (_, _) => UpdateFlyoutHeight();
+        Shell.Loaded += (_, _) => QueueFlyoutHeightUpdate();
         _outsideClickTimer = DispatcherQueue.CreateTimer();
         _outsideClickTimer.Interval = TimeSpan.FromMilliseconds(50);
         _outsideClickTimer.Tick += OnOutsideClickTimerTick;
@@ -169,7 +171,25 @@ public sealed partial class FlyoutWindow : Window
         IntervalText = $"Refresh interval {Math.Max(1, config.RefreshIntervalSeconds / 60)} min";
         ApplyBackdrop(config.FlyoutStyle);
         Bindings.Update();
-        UpdateFlyoutHeight();
+        QueueFlyoutHeightUpdate();
+    }
+
+    private void QueueFlyoutHeightUpdate(bool animate = false)
+    {
+        _pendingHeightAnimation |= animate;
+        if (_heightUpdatePending)
+        {
+            return;
+        }
+
+        _heightUpdatePending = true;
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            _heightUpdatePending = false;
+            bool shouldAnimate = _pendingHeightAnimation;
+            _pendingHeightAnimation = false;
+            UpdateFlyoutHeight(shouldAnimate);
+        });
     }
 
     // The flyout has no inner scrollbar: it grows with its content, capped to
@@ -434,7 +454,7 @@ public sealed partial class FlyoutWindow : Window
             _expandedHistories.Remove(provider.Name);
         }
 
-        UpdateFlyoutHeight(animate: true);
+        QueueFlyoutHeightUpdate(animate: true);
     }
 
     // A soft fade + upward slide whenever the history panel appears; the
@@ -621,6 +641,6 @@ public sealed partial class FlyoutWindow : Window
     {
         CodexSwitchStatusText = text;
         Bindings.Update();
-        UpdateFlyoutHeight(animate);
+        QueueFlyoutHeightUpdate(animate);
     }
 }

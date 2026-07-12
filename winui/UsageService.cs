@@ -453,7 +453,7 @@ public sealed class UsageService : IDisposable
             "service_tier = \"fast\"" + Environment.NewLine);
     }
 
-    private static ProfileUsage ParseCodexProfile(ProfileConfig profile, IReadOnlyList<string> stdoutLines)
+    internal static ProfileUsage ParseCodexProfile(ProfileConfig profile, IReadOnlyList<string> stdoutLines)
     {
         string email = string.Empty;
         string plan = string.Empty;
@@ -461,6 +461,9 @@ public sealed class UsageService : IDisposable
         int? weeklyPercent = null;
         DateTimeOffset? primaryResetAt = null;
         DateTimeOffset? weeklyResetAt = null;
+        string primaryQuotaLabel = "5h";
+        string weeklyQuotaLabel = "Weekly";
+        List<QuotaGroupUsage> quotaGroups = [];
         bool rateLimitError = false;
 
         foreach (string line in stdoutLines)
@@ -489,27 +492,84 @@ public sealed class UsageService : IDisposable
             }
             else if (id == 3)
             {
-                if (HasTopLevelProperty(root, "error"))
+                if (HasTopLevelProperty(root, "error") ||
+                    !TryGetProperty(root, "result", out JsonElement result))
                 {
                     rateLimitError = true;
                     continue;
                 }
 
-                if (TryFindProperty(root, "primary", out JsonElement primary))
+                string baseLimitId = string.Empty;
+                if (TryGetProperty(result, "rateLimits", out JsonElement rateLimits) &&
+                    rateLimits.ValueKind == JsonValueKind.Object)
                 {
-                    remainingPercent = TryReadRemainingPercent(primary);
-                    primaryResetAt = TryReadResetTime(primary);
+                    baseLimitId = FindString(rateLimits, "limitId", "limit_id") ?? string.Empty;
+                    string? rateLimitPlan = FindString(rateLimits, "planType", "plan_type");
+                    if (!string.IsNullOrWhiteSpace(rateLimitPlan))
+                    {
+                        plan = rateLimitPlan;
+                    }
+
+                    QuotaGroupUsage? baseGroup = ParseCodexQuotaGroup(rateLimits, string.Empty);
+                    if (baseGroup is not null)
+                    {
+                        quotaGroups.Add(baseGroup);
+                        if (TryGetQuotaWindow(rateLimits, "primary", "5h", out QuotaWindowUsage primary))
+                        {
+                            remainingPercent = primary.RemainingPercent;
+                            primaryResetAt = primary.ResetAt;
+                            primaryQuotaLabel = primary.Label;
+                        }
+
+                        if (TryGetQuotaWindow(rateLimits, "secondary", "Weekly", out QuotaWindowUsage secondary))
+                        {
+                            weeklyPercent = secondary.RemainingPercent;
+                            weeklyResetAt = secondary.ResetAt;
+                            weeklyQuotaLabel = secondary.Label;
+                        }
+                    }
                 }
 
-                if (TryFindProperty(root, "secondary", out JsonElement secondary))
+                if (TryGetProperty(result, "rateLimitsByLimitId", out JsonElement rateLimitsById) &&
+                    rateLimitsById.ValueKind == JsonValueKind.Object)
                 {
-                    weeklyPercent = TryReadRemainingPercent(secondary);
-                    weeklyResetAt = TryReadResetTime(secondary);
+                    HashSet<string> seenLimitIds = new(StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(baseLimitId))
+                    {
+                        seenLimitIds.Add(baseLimitId);
+                    }
+
+                    foreach (JsonProperty property in rateLimitsById.EnumerateObject())
+                    {
+                        JsonElement bucket = property.Value;
+                        if (bucket.ValueKind != JsonValueKind.Object)
+                        {
+                            continue;
+                        }
+
+                        string limitId = FindString(bucket, "limitId", "limit_id") ?? property.Name;
+                        if (!seenLimitIds.Add(limitId))
+                        {
+                            continue;
+                        }
+
+                        string limitName = FindString(bucket, "limitName", "limit_name") ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(limitName))
+                        {
+                            limitName = FormatLimitName(limitId);
+                        }
+
+                        QuotaGroupUsage? group = ParseCodexQuotaGroup(bucket, limitName);
+                        if (group is not null)
+                        {
+                            quotaGroups.Add(group);
+                        }
+                    }
                 }
             }
         }
 
-        bool available = !rateLimitError && remainingPercent.HasValue && weeklyPercent.HasValue;
+        bool available = !rateLimitError && (remainingPercent.HasValue || weeklyPercent.HasValue);
         return new ProfileUsage(
             profile.Label,
             email,
@@ -524,8 +584,90 @@ public sealed class UsageService : IDisposable
             HasCodexAuth = CodexAccountSwitchService.HasProfileAuth(profile),
             IsActiveCodexAccount = CodexAccountSwitchService.IsActiveProfile(profile),
             PrimaryResetAt = primaryResetAt,
-            WeeklyResetAt = weeklyResetAt
+            WeeklyResetAt = weeklyResetAt,
+            HasPrimaryQuota = remainingPercent.HasValue,
+            HasWeeklyQuota = weeklyPercent.HasValue,
+            PrimaryQuotaLabel = primaryQuotaLabel,
+            WeeklyQuotaLabel = weeklyQuotaLabel,
+            QuotaGroups = quotaGroups
         };
+    }
+
+    private static QuotaGroupUsage? ParseCodexQuotaGroup(JsonElement bucket, string name)
+    {
+        List<QuotaWindowUsage> windows = [];
+        if (TryGetQuotaWindow(bucket, "primary", "5h", out QuotaWindowUsage primary))
+        {
+            windows.Add(primary);
+        }
+
+        if (TryGetQuotaWindow(bucket, "secondary", "Weekly", out QuotaWindowUsage secondary))
+        {
+            windows.Add(secondary);
+        }
+
+        return windows.Count == 0 ? null : new QuotaGroupUsage(name, windows);
+    }
+
+    private static bool TryGetQuotaWindow(
+        JsonElement bucket,
+        string propertyName,
+        string fallbackLabel,
+        out QuotaWindowUsage window)
+    {
+        if (TryGetProperty(bucket, propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.Object &&
+            TryReadRemainingPercent(value) is { } remainingPercent)
+        {
+            window = new QuotaWindowUsage(
+                FormatQuotaWindowLabel(value, fallbackLabel),
+                remainingPercent,
+                true,
+                TryReadResetTime(value),
+                MockUsageData.CodexAccentColor);
+            return true;
+        }
+
+        window = null!;
+        return false;
+    }
+
+    private static string FormatQuotaWindowLabel(JsonElement window, string fallbackLabel)
+    {
+        if (!TryFindNumber(window, out double rawMinutes, "windowDurationMins", "window_duration_mins") ||
+            rawMinutes <= 0)
+        {
+            return fallbackLabel;
+        }
+
+        int minutes = Math.Max(1, (int)Math.Round(rawMinutes));
+        if (minutes == 7 * 24 * 60)
+        {
+            return "Weekly";
+        }
+
+        if (minutes % (24 * 60) == 0)
+        {
+            return $"{minutes / (24 * 60)}d";
+        }
+
+        if (minutes % 60 == 0)
+        {
+            return $"{minutes / 60}h";
+        }
+
+        return $"{minutes}m";
+    }
+
+    private static string FormatLimitName(string limitId)
+    {
+        string[] tokens = limitId
+            .Replace('_', ' ')
+            .Replace('-', ' ')
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return tokens.Length == 0
+            ? "Additional usage"
+            : string.Join(' ', tokens.Select(token => char.ToUpperInvariant(token[0]) + token[1..]));
     }
 
     private static DateTimeOffset? TryReadResetTime(JsonElement element)

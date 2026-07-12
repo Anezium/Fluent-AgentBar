@@ -221,7 +221,7 @@
                                             </ItemsRepeater.Layout>
                                             <ItemsRepeater.ItemTemplate>
                                                 <DataTemplate x:DataType="local:ProfileUsage">
-                                                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="6">
+                                                    <StackPanel Spacing="6">
                                                         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                                                             <TextBlock
                                                                 Style="{ThemeResource BodyTextBlockStyle}"
@@ -255,64 +255,69 @@
                                                                 </StackPanel>
                                                             </Button>
                                                         </Grid>
-                                                        <Grid
-                                                            Grid.Row="1"
-                                                            ColumnDefinitions="48,*,38"
-                                                            ColumnSpacing="8">
-                                                            <TextBlock
-                                                                VerticalAlignment="Center"
-                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                                                Text="5h" />
-                                                            <ProgressBar
-                                                                Grid.Column="1"
-                                                                MinHeight="5"
-                                                                Height="5"
-                                                                VerticalAlignment="Center"
-                                                                Maximum="100"
-                                                                Foreground="{x:Bind AccentBrush}"
-                                                                Value="{x:Bind RemainingPercent}" />
-                                                            <TextBlock
-                                                                Grid.Column="2"
-                                                                VerticalAlignment="Center"
-                                                                FontWeight="SemiBold"
-                                                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                                                TextAlignment="Right"
-                                                                Text="{x:Bind RemainingText}" />
-                                                        </Grid>
-                                                        <Grid
-                                                            Grid.Row="2"
-                                                            ColumnDefinitions="48,*,38"
-                                                            ColumnSpacing="8">
-                                                            <TextBlock
-                                                                VerticalAlignment="Center"
-                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                                                Text="Weekly" />
-                                                            <ProgressBar
-                                                                Grid.Column="1"
-                                                                MinHeight="5"
-                                                                Height="5"
-                                                                VerticalAlignment="Center"
-                                                                Maximum="100"
-                                                                Foreground="{x:Bind AccentBrush}"
-                                                                Value="{x:Bind WeeklyPercent}" />
-                                                            <TextBlock
-                                                                Grid.Column="2"
-                                                                VerticalAlignment="Center"
-                                                                FontWeight="SemiBold"
-                                                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                                                TextAlignment="Right"
-                                                                Text="{x:Bind WeeklyText}" />
-                                                        </Grid>
-                                                        <TextBlock
-                                                            Grid.Row="3"
-                                                            HorizontalAlignment="Right"
-                                                            FontSize="11"
-                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                            Text="{x:Bind ResetsText}"
-                                                            Visibility="{x:Bind ResetsVisibility}" />
-                                                    </Grid>
+                                                        <ItemsRepeater ItemsSource="{x:Bind DisplayQuotaGroups}">
+                                                            <ItemsRepeater.Layout>
+                                                                <StackLayout Spacing="8" />
+                                                            </ItemsRepeater.Layout>
+                                                            <ItemsRepeater.ItemTemplate>
+                                                                <DataTemplate x:DataType="local:QuotaGroupUsage">
+                                                                    <StackPanel Spacing="6">
+                                                                        <TextBlock
+                                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                            FontWeight="SemiBold"
+                                                                            Style="{ThemeResource CaptionTextBlockStyle}"
+                                                                            Text="{x:Bind Name}"
+                                                                            Visibility="{x:Bind NameVisibility}" />
+                                                                        <ItemsControl
+                                                                            HorizontalContentAlignment="Stretch"
+                                                                            ItemsSource="{x:Bind Windows}">
+                                                                            <ItemsControl.ItemsPanel>
+                                                                                <ItemsPanelTemplate>
+                                                                                    <StackPanel Spacing="6" />
+                                                                                </ItemsPanelTemplate>
+                                                                            </ItemsControl.ItemsPanel>
+                                                                            <ItemsControl.ItemTemplate>
+                                                                                <DataTemplate x:DataType="local:QuotaWindowUsage">
+                                                                                    <Grid ColumnDefinitions="Auto,*,38" ColumnSpacing="8">
+                                                                                        <TextBlock
+                                                                                            MinWidth="48"
+                                                                                            MaxWidth="160"
+                                                                                            VerticalAlignment="Center"
+                                                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                                            Style="{ThemeResource CaptionTextBlockStyle}"
+                                                                                            Text="{x:Bind Label}"
+                                                                                            TextTrimming="CharacterEllipsis"
+                                                                                            ToolTipService.ToolTip="{x:Bind Label}" />
+                                                                                        <ProgressBar
+                                                                                            Grid.Column="1"
+                                                                                            MinHeight="5"
+                                                                                            Height="5"
+                                                                                            VerticalAlignment="Center"
+                                                                                            Maximum="100"
+                                                                                            Foreground="{x:Bind AccentBrush}"
+                                                                                            Value="{x:Bind RemainingPercent}" />
+                                                                                        <TextBlock
+                                                                                            Grid.Column="2"
+                                                                                            VerticalAlignment="Center"
+                                                                                            FontWeight="SemiBold"
+                                                                                            Style="{ThemeResource CaptionTextBlockStyle}"
+                                                                                            TextAlignment="Right"
+                                                                                            Text="{x:Bind RemainingText}" />
+                                                                                    </Grid>
+                                                                                </DataTemplate>
+                                                                            </ItemsControl.ItemTemplate>
+                                                                        </ItemsControl>
+                                                                        <TextBlock
+                                                                            HorizontalAlignment="Right"
+                                                                            FontSize="11"
+                                                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                            Text="{x:Bind ResetsText}"
+                                                                            Visibility="{x:Bind ResetsVisibility}" />
+                                                                    </StackPanel>
+                                                                </DataTemplate>
+                                                            </ItemsRepeater.ItemTemplate>
+                                                        </ItemsRepeater>
+                                                    </StackPanel>
                                                 </DataTemplate>
                                             </ItemsRepeater.ItemTemplate>
                                         </ItemsRepeater>

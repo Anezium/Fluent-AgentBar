@@ -252,6 +252,16 @@ public partial class App : Application
     private static void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         System.Diagnostics.Debug.WriteLine(e.Exception);
+        try
+        {
+            Directory.CreateDirectory(AppConfigStore.ConfigDirectory);
+            File.AppendAllText(
+                Path.Combine(AppConfigStore.ConfigDirectory, "crash.log"),
+                $"[{DateTimeOffset.Now:O}] {e.Exception}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
     }
 
     private void OnProcessExit(object? sender, EventArgs e)

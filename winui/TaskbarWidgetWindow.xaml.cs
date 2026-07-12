@@ -53,6 +53,7 @@ public sealed partial class TaskbarWidgetWindow : Window
     public int RemainingPercent { get; private set; } = MockUsageData.PrimaryProfile.RemainingPercent;
     public string RemainingText { get; private set; } = MockUsageData.PrimaryProfile.RemainingText;
     public string WeeklyQuotaLabel { get; private set; } = "Wk";
+    public Visibility WeeklyQuotaVisibility { get; private set; } = Visibility.Visible;
     public int WeeklyPercent { get; private set; } = MockUsageData.PrimaryProfile.WeeklyPercent;
     public string WeeklyText { get; private set; } = MockUsageData.PrimaryProfile.WeeklyText;
     public GridLength PrimaryFillWidth { get; private set; } = new(72, GridUnitType.Star);
@@ -165,12 +166,17 @@ public sealed partial class TaskbarWidgetWindow : Window
         ProfilePlan = profile.PlanDisplay;
         PlanVisibility = ProfilePlan.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         ProfileLabel = $"{providerName} · {profile.Label}";
-        PrimaryQuotaLabel = "5h";
-        RemainingPercent = profile.RemainingPercent;
-        RemainingText = profile.RemainingText;
-        WeeklyQuotaLabel = "Wk";
-        WeeklyPercent = profile.WeeklyPercent;
-        WeeklyText = profile.WeeklyText;
+        IReadOnlyList<QuotaWindowUsage> quotaWindows = profile.DisplayQuotaGroups
+            .FirstOrDefault()?.Windows ?? [];
+        QuotaWindowUsage? primaryQuota = quotaWindows.ElementAtOrDefault(0);
+        QuotaWindowUsage? weeklyQuota = quotaWindows.ElementAtOrDefault(1);
+        PrimaryQuotaLabel = primaryQuota?.Label ?? profile.PrimaryQuotaLabel;
+        RemainingPercent = primaryQuota?.RemainingPercent ?? profile.RemainingPercent;
+        RemainingText = primaryQuota?.RemainingText ?? profile.RemainingText;
+        WeeklyQuotaLabel = weeklyQuota?.Label == "Weekly" ? "Wk" : weeklyQuota?.Label ?? "Wk";
+        WeeklyPercent = weeklyQuota?.RemainingPercent ?? 0;
+        WeeklyText = weeklyQuota?.RemainingText ?? "--";
+        WeeklyQuotaVisibility = weeklyQuota is null ? Visibility.Collapsed : Visibility.Visible;
         PrimaryFillWidth = new GridLength(Math.Clamp(RemainingPercent, 0, 100), GridUnitType.Star);
         PrimaryRestWidth = new GridLength(100 - Math.Clamp(RemainingPercent, 0, 100), GridUnitType.Star);
         WeeklyFillWidth = new GridLength(Math.Clamp(WeeklyPercent, 0, 100), GridUnitType.Star);

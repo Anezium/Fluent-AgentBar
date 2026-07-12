@@ -102,6 +102,9 @@ You can still edit `%APPDATA%\Fluent AgentBar\config.json` directly:
 Each Codex profile is refreshed with its own `CODEX_HOME`. Each Claude profile
 is refreshed with its own `CLAUDE_CONFIG_DIR`; the default Claude profile uses
 `%USERPROFILE%\.claude` so an existing Claude CLI login is reused.
+If `CLAUDE_CODE_OAUTH_TOKEN` is set, AgentBar uses it as the Claude OAuth access
+token override for usage reads. The token is read from the process, user, or
+machine environment and is not written to `.credentials.json`.
 
 Use the profile card `Login` button to authenticate a profile. The app keeps
 Codex credentials in that profile's `CODEX_HOME`, so it does not log out or
@@ -117,5 +120,5 @@ the desktop app picks up the new account.
 
 - Codex account and quota RPC are wired through `codex app-server`.
 - Codex profile login is implemented with app-server browser auth for the current local Codex CLI version.
-- Claude quota parsing is wired through local Claude OAuth credentials.
+- Claude quota parsing is wired through local Claude OAuth credentials or `CLAUDE_CODE_OAUTH_TOKEN`.
 - Cookie import and OAuth repair flows are not ported yet.

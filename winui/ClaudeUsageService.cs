@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace FluentAgentBar;
 
@@ -12,15 +13,35 @@ internal sealed class ClaudeUsageService : IDisposable
     private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
     private const string RefreshUrl = "https://platform.claude.com/v1/oauth/token";
     private const string OAuthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+    private const string ClaudeCodeOAuthTokenEnvironmentVariable = "CLAUDE_CODE_OAUTH_TOKEN";
     private const string ClaudeBeta = "oauth-2025-04-20";
     private const string UserAgent = "claude-code/2.0 (external, swbar)";
+    private const string DefaultFullOAuthScopes =
+        "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 
     private static readonly TimeSpan MinimumFetchInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan InitialBackoff = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MaximumBackoff = TimeSpan.FromMinutes(30);
 
-    private readonly HttpClient _httpClient = new();
+    private readonly HttpClient _httpClient;
+    private readonly Func<string?> _readEnvironmentOAuthToken;
     private readonly ConcurrentDictionary<string, ClaudeUsageState> _states = new(StringComparer.OrdinalIgnoreCase);
+
+    public ClaudeUsageService()
+        : this(new HttpClient(), ReadEnvironmentOAuthToken)
+    {
+    }
+
+    internal ClaudeUsageService(HttpClient httpClient)
+        : this(httpClient, ReadEnvironmentOAuthToken)
+    {
+    }
+
+    internal ClaudeUsageService(HttpClient httpClient, Func<string?> readEnvironmentOAuthToken)
+    {
+        _httpClient = httpClient;
+        _readEnvironmentOAuthToken = readEnvironmentOAuthToken;
+    }
 
     public async Task<ProfileUsage> FetchAsync(string configDir, CancellationToken cancellationToken)
     {
@@ -28,55 +49,96 @@ internal sealed class ClaudeUsageService : IDisposable
         ClaudeUsageState state = _states.GetOrAdd(normalizedConfigDir, _ => new ClaudeUsageState());
         string credentialsPath = Path.Combine(normalizedConfigDir, ".credentials.json");
         EnsureAccountEmail(state, normalizedConfigDir);
+        string? environmentAccessToken = NormalizeToken(_readEnvironmentOAuthToken());
 
-        if (!File.Exists(credentialsPath))
+        bool hasCredentialsFile = File.Exists(credentialsPath);
+        if (!hasCredentialsFile && string.IsNullOrWhiteSpace(environmentAccessToken))
         {
             return Unavailable();
         }
 
-        ClaudeCredentials? credentials;
-        try
+        ClaudeCredentials? credentials = null;
+        if (hasCredentialsFile)
         {
-            credentials = await ReadCredentialsAsync(credentialsPath, cancellationToken);
+            try
+            {
+                credentials = await ReadCredentialsAsync(credentialsPath, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex);
+                if (string.IsNullOrWhiteSpace(environmentAccessToken))
+                {
+                    return CachedOrUnavailable(state);
+                }
+            }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+
+        if (credentials is null && string.IsNullOrWhiteSpace(environmentAccessToken))
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine(ex);
             return CachedOrUnavailable(state);
         }
 
-        if (credentials is null)
+        ClaudeCredentials? fileCredentials = credentials;
+        bool hasQuotaCapableFileCredentials = credentials?.AllowsUserProfileScope == true;
+        if (!hasQuotaCapableFileCredentials && string.IsNullOrWhiteSpace(environmentAccessToken))
         {
-            return CachedOrUnavailable(state);
+            return Unavailable("Full Login Required");
         }
 
-        credentials = ApplyRefreshedCredentials(state, credentials);
+        bool usesEnvironmentToken = !hasQuotaCapableFileCredentials &&
+            !string.IsNullOrWhiteSpace(environmentAccessToken);
+        credentials = usesEnvironmentToken
+            ? WithEnvironmentAccessToken(environmentAccessToken!, credentials)
+            : ApplyRefreshedCredentials(state, credentials!);
+        string authFingerprint = CreateAuthFingerprint(credentials.AccessToken);
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (state.Sync)
         {
-            if (state.CachedUsage is not null && now - state.LastSuccessfulFetch < MinimumFetchInterval)
+            bool sameCachedAuth = string.Equals(
+                state.CachedUsageAuthFingerprint,
+                authFingerprint,
+                StringComparison.Ordinal);
+            if (sameCachedAuth &&
+                state.CachedUsage is not null &&
+                now - state.LastSuccessfulFetch < MinimumFetchInterval)
             {
                 return ToProfile(state.CachedUsage, state.AccountEmail ?? string.Empty);
             }
 
-            if (now < state.NextAllowedFetch)
+            bool sameBackoffAuth = string.Equals(
+                state.BackoffAuthFingerprint,
+                authFingerprint,
+                StringComparison.Ordinal);
+            if (sameBackoffAuth && now < state.NextAllowedFetch)
             {
-                return CachedOrUnavailableNoLock(state);
+                return sameCachedAuth ? CachedOrUnavailableNoLock(state) : Unavailable();
             }
         }
 
         try
         {
-            if (credentials.ExpiresAt <= DateTimeOffset.UtcNow)
+            if (!usesEnvironmentToken && credentials.ExpiresAt <= DateTimeOffset.UtcNow)
             {
                 string sourceRefreshToken = credentials.RefreshToken;
-                credentials = await RefreshCredentialsAsync(credentials, cancellationToken);
-                RememberRefreshedCredentials(state, credentials, sourceRefreshToken);
+                ClaudeCredentials refreshedCredentials = await RefreshCredentialsAsync(credentials, cancellationToken);
+                ClaudeRefreshPersistenceResult persistenceResult = await TryPersistRefreshedCredentialsAsync(
+                    credentialsPath,
+                    refreshedCredentials,
+                    sourceRefreshToken,
+                    cancellationToken);
+                credentials = persistenceResult.Credentials;
+                if (persistenceResult.RememberInMemory)
+                {
+                    RememberRefreshedCredentials(state, credentials, sourceRefreshToken);
+                }
+
+                authFingerprint = CreateAuthFingerprint(credentials.AccessToken);
             }
 
             ClaudeUsageSnapshot usage = await FetchUsageAsync(credentials.AccessToken, cancellationToken);
@@ -85,7 +147,7 @@ internal sealed class ClaudeUsageService : IDisposable
                 usage = usage with { Plan = credentials.SubscriptionType };
             }
 
-            RegisterSuccess(state, usage);
+            RegisterSuccess(state, usage, authFingerprint);
             return ToProfile(usage, state.AccountEmail ?? string.Empty);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -95,14 +157,27 @@ internal sealed class ClaudeUsageService : IDisposable
         catch (ClaudeUsageRequestException ex)
         {
             Debug.WriteLine(ex);
-            RegisterFailure(state, ex.RetryAfter);
-            return CachedOrUnavailable(state);
+            if (usesEnvironmentToken && ex.RequiresUserProfileScope)
+            {
+                ProfileUsage? fallbackUsage = await TryFetchWithFileCredentialsAfterEnvironmentScopeFailureAsync(
+                    state,
+                    credentialsPath,
+                    fileCredentials,
+                    cancellationToken);
+                return fallbackUsage ?? Unavailable("Full Login Required");
+            }
+
+            RegisterFailure(state, authFingerprint, ex.RetryAfter);
+            ProfileUsage fallback = CachedOrUnavailable(state, authFingerprint);
+            return ex.RequiresLogin && !fallback.IsAvailable
+                ? Unavailable("Login Required")
+                : fallback;
         }
         catch (Exception ex)
         {
             Debug.WriteLine(ex);
-            RegisterFailure(state, null);
-            return CachedOrUnavailable(state);
+            RegisterFailure(state, authFingerprint, null);
+            return CachedOrUnavailable(state, authFingerprint);
         }
     }
 
@@ -117,9 +192,12 @@ internal sealed class ClaudeUsageService : IDisposable
         using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
+            string errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
             throw new ClaudeUsageRequestException(
                 $"Claude usage request failed with HTTP {(int)response.StatusCode}.",
-                response.Headers.RetryAfter);
+                response.Headers.RetryAfter,
+                RequiresUserProfileScope: ErrorBodyRequiresUserProfileScope(errorBody),
+                RequiresLogin: response.StatusCode == System.Net.HttpStatusCode.Unauthorized);
         }
 
         string json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -139,7 +217,10 @@ internal sealed class ClaudeUsageService : IDisposable
         {
             ["grant_type"] = "refresh_token",
             ["refresh_token"] = credentials.RefreshToken,
-            ["client_id"] = OAuthClientId
+            ["client_id"] = OAuthClientId,
+            ["scope"] = string.IsNullOrWhiteSpace(credentials.Scopes)
+                ? DefaultFullOAuthScopes
+                : credentials.Scopes
         };
 
         using StringContent content = new(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -153,9 +234,13 @@ internal sealed class ClaudeUsageService : IDisposable
         using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
+            string errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
             throw new ClaudeUsageRequestException(
                 $"Claude OAuth refresh failed with HTTP {(int)response.StatusCode}.",
-                response.Headers.RetryAfter);
+                response.Headers.RetryAfter,
+                RequiresLogin: response.StatusCode is System.Net.HttpStatusCode.BadRequest or
+                    System.Net.HttpStatusCode.Unauthorized ||
+                    errorBody.Contains("invalid_grant", StringComparison.OrdinalIgnoreCase));
         }
 
         string json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -181,15 +266,97 @@ internal sealed class ClaudeUsageService : IDisposable
             return null;
         }
 
-        DateTimeOffset expiresAt = TryReadEpochMilliseconds(oauth, out DateTimeOffset parsedExpiresAt)
+        DateTimeOffset expiresAt = TryReadEpochMilliseconds(oauth!, out DateTimeOffset parsedExpiresAt)
             ? parsedExpiresAt
             : DateTimeOffset.MaxValue;
 
         // Claude Code persists the plan here ("pro", "max", …); the usage
         // endpoint does not always echo it back.
         string subscriptionType = TryReadString(oauth, "subscriptionType", "subscription_type") ?? string.Empty;
+        bool allowsUserProfileScope = AllowsUserProfileScope(oauth);
+        string scopes = ReadScopes(oauth);
 
-        return new ClaudeCredentials(accessToken, refreshToken, expiresAt, subscriptionType);
+        return new ClaudeCredentials(
+            accessToken,
+            refreshToken,
+            expiresAt,
+            subscriptionType,
+            allowsUserProfileScope,
+            scopes);
+    }
+
+    private static async Task<ClaudeRefreshPersistenceResult> TryPersistRefreshedCredentialsAsync(
+        string credentialsPath,
+        ClaudeCredentials credentials,
+        string sourceRefreshToken,
+        CancellationToken cancellationToken)
+    {
+        string? tempPath = null;
+        try
+        {
+            string json = await File.ReadAllTextAsync(credentialsPath, cancellationToken);
+            JsonNode? parsed = JsonNode.Parse(json);
+            if (parsed is not JsonObject root ||
+                !TryGetObject(root, "claudeAiOauth", out JsonObject? oauth))
+            {
+                return ClaudeRefreshPersistenceResult.UseInMemory(credentials);
+            }
+
+            ClaudeCredentials? currentCredentials = TryReadCredentials(root);
+            if (currentCredentials is not null &&
+                !string.Equals(currentCredentials.RefreshToken, sourceRefreshToken, StringComparison.Ordinal))
+            {
+                return ClaudeRefreshPersistenceResult.UseDisk(currentCredentials);
+            }
+
+            if (currentCredentials is null)
+            {
+                return ClaudeRefreshPersistenceResult.UseInMemory(credentials);
+            }
+
+            SetProperty(oauth!, "accessToken", credentials.AccessToken, "access_token");
+            SetProperty(oauth!, "refreshToken", credentials.RefreshToken, "refresh_token");
+            SetProperty(oauth!, "expiresAt", credentials.ExpiresAt.ToUnixTimeMilliseconds(), "expires_at");
+
+            string directory = Path.GetDirectoryName(credentialsPath) ?? string.Empty;
+            string fileName = Path.GetFileName(credentialsPath);
+            tempPath = Path.Combine(directory, $".{fileName}.{Guid.NewGuid():N}.tmp");
+            JsonSerializerOptions options = new() { WriteIndented = true };
+            await File.WriteAllTextAsync(tempPath, root.ToJsonString(options), cancellationToken);
+
+            ClaudeCredentials? guardedCredentials = await ReadCredentialsAsync(credentialsPath, cancellationToken);
+            if (guardedCredentials is not null &&
+                !string.Equals(guardedCredentials.RefreshToken, sourceRefreshToken, StringComparison.Ordinal))
+            {
+                return ClaudeRefreshPersistenceResult.UseDisk(guardedCredentials);
+            }
+
+            if (guardedCredentials is null)
+            {
+                return ClaudeRefreshPersistenceResult.UseInMemory(credentials);
+            }
+
+            File.Replace(tempPath, credentialsPath, null, true);
+            tempPath = null;
+
+            return ClaudeRefreshPersistenceResult.UseInMemory(credentials);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            return ClaudeRefreshPersistenceResult.UseInMemory(credentials);
+        }
+        finally
+        {
+            if (tempPath is not null)
+            {
+                TryDelete(tempPath);
+            }
+        }
     }
 
     private static ClaudeUsageSnapshot ParseUsage(string json)
@@ -275,7 +442,13 @@ internal sealed class ClaudeUsageService : IDisposable
             throw new ClaudeUsageRequestException("Claude OAuth refresh did not return an access token.");
         }
 
-        return new ClaudeCredentials(accessToken, refreshToken, expiresAt, previousCredentials.SubscriptionType);
+        return new ClaudeCredentials(
+            accessToken,
+            refreshToken,
+            expiresAt,
+            previousCredentials.SubscriptionType,
+            previousCredentials.AllowsUserProfileScope,
+            TryReadString(root, "scope", "scopes") ?? previousCredentials.Scopes);
     }
 
     private ClaudeCredentials ApplyRefreshedCredentials(ClaudeUsageState state, ClaudeCredentials fileCredentials)
@@ -299,6 +472,103 @@ internal sealed class ClaudeUsageService : IDisposable
         return fileCredentials;
     }
 
+    private static ClaudeCredentials WithEnvironmentAccessToken(
+        string accessToken,
+        ClaudeCredentials? fileCredentials)
+    {
+        return new ClaudeCredentials(
+            accessToken,
+            fileCredentials?.RefreshToken ?? string.Empty,
+            DateTimeOffset.MaxValue,
+            fileCredentials?.SubscriptionType ?? string.Empty,
+            AllowsUserProfileScope: false,
+            Scopes: string.Empty);
+    }
+
+    private async Task<ProfileUsage?> TryFetchWithFileCredentialsAfterEnvironmentScopeFailureAsync(
+        ClaudeUsageState state,
+        string credentialsPath,
+        ClaudeCredentials? fileCredentials,
+        CancellationToken cancellationToken)
+    {
+        if (fileCredentials is null)
+        {
+            return null;
+        }
+
+        ClaudeCredentials credentials = ApplyRefreshedCredentials(state, fileCredentials);
+        string authFingerprint = CreateAuthFingerprint(credentials.AccessToken);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        lock (state.Sync)
+        {
+            bool sameCachedAuth = string.Equals(
+                state.CachedUsageAuthFingerprint,
+                authFingerprint,
+                StringComparison.Ordinal);
+            if (sameCachedAuth &&
+                state.CachedUsage is not null &&
+                now - state.LastSuccessfulFetch < MinimumFetchInterval)
+            {
+                return ToProfile(state.CachedUsage, state.AccountEmail ?? string.Empty);
+            }
+
+            bool sameBackoffAuth = string.Equals(
+                state.BackoffAuthFingerprint,
+                authFingerprint,
+                StringComparison.Ordinal);
+            if (sameBackoffAuth && now < state.NextAllowedFetch)
+            {
+                return sameCachedAuth ? CachedOrUnavailableNoLock(state) : null;
+            }
+        }
+
+        try
+        {
+            if (credentials.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                string sourceRefreshToken = credentials.RefreshToken;
+                ClaudeCredentials refreshedCredentials = await RefreshCredentialsAsync(credentials, cancellationToken);
+                ClaudeRefreshPersistenceResult persistenceResult = await TryPersistRefreshedCredentialsAsync(
+                    credentialsPath,
+                    refreshedCredentials,
+                    sourceRefreshToken,
+                    cancellationToken);
+                credentials = persistenceResult.Credentials;
+                if (persistenceResult.RememberInMemory)
+                {
+                    RememberRefreshedCredentials(state, credentials, sourceRefreshToken);
+                }
+
+                authFingerprint = CreateAuthFingerprint(credentials.AccessToken);
+            }
+
+            ClaudeUsageSnapshot usage = await FetchUsageAsync(credentials.AccessToken, cancellationToken);
+            if (string.IsNullOrWhiteSpace(usage.Plan) && !string.IsNullOrWhiteSpace(credentials.SubscriptionType))
+            {
+                usage = usage with { Plan = credentials.SubscriptionType };
+            }
+
+            RegisterSuccess(state, usage, authFingerprint);
+            return ToProfile(usage, state.AccountEmail ?? string.Empty);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (ClaudeUsageRequestException ex)
+        {
+            Debug.WriteLine(ex);
+            RegisterFailure(state, authFingerprint, ex.RetryAfter);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            RegisterFailure(state, authFingerprint, null);
+            return null;
+        }
+    }
+
     private static void RememberRefreshedCredentials(
         ClaudeUsageState state,
         ClaudeCredentials credentials,
@@ -311,25 +581,31 @@ internal sealed class ClaudeUsageService : IDisposable
         }
     }
 
-    private static void RegisterSuccess(ClaudeUsageState state, ClaudeUsageSnapshot usage)
+    private static void RegisterSuccess(ClaudeUsageState state, ClaudeUsageSnapshot usage, string authFingerprint)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (state.Sync)
         {
             state.CachedUsage = usage;
+            state.CachedUsageAuthFingerprint = authFingerprint;
+            state.BackoffAuthFingerprint = authFingerprint;
             state.LastSuccessfulFetch = now;
             state.NextAllowedFetch = now + MinimumFetchInterval;
             state.FailureBackoff = InitialBackoff;
         }
     }
 
-    private static void RegisterFailure(ClaudeUsageState state, RetryConditionHeaderValue? retryAfterHeader)
+    private static void RegisterFailure(
+        ClaudeUsageState state,
+        string authFingerprint,
+        RetryConditionHeaderValue? retryAfterHeader)
     {
         TimeSpan retryAfter = GetRetryAfterDelay(retryAfterHeader);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
         lock (state.Sync)
         {
+            state.BackoffAuthFingerprint = authFingerprint;
             TimeSpan delay = retryAfter > state.FailureBackoff ? retryAfter : state.FailureBackoff;
             state.NextAllowedFetch = now + delay;
             state.FailureBackoff = TimeSpan.FromMinutes(Math.Min(
@@ -364,6 +640,16 @@ internal sealed class ClaudeUsageService : IDisposable
         lock (state.Sync)
         {
             return CachedOrUnavailableNoLock(state);
+        }
+    }
+
+    private static ProfileUsage CachedOrUnavailable(ClaudeUsageState state, string authFingerprint)
+    {
+        lock (state.Sync)
+        {
+            return string.Equals(state.CachedUsageAuthFingerprint, authFingerprint, StringComparison.Ordinal)
+                ? CachedOrUnavailableNoLock(state)
+                : Unavailable();
         }
     }
 
@@ -449,10 +735,15 @@ internal sealed class ClaudeUsageService : IDisposable
 
     private static ProfileUsage Unavailable()
     {
+        return Unavailable(string.Empty);
+    }
+
+    private static ProfileUsage Unavailable(string plan)
+    {
         return new ProfileUsage(
             "Claude Code",
             string.Empty,
-            string.Empty,
+            plan,
             0,
             0,
             false,
@@ -474,6 +765,11 @@ internal sealed class ClaudeUsageService : IDisposable
         return (int)Math.Clamp(Math.Round(value), 0, 100);
     }
 
+    private static bool ErrorBodyRequiresUserProfileScope(string errorBody)
+    {
+        return errorBody.Contains("user:profile", StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static string GetClaudeConfigDirectory()
     {
         string? configuredDirectory = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
@@ -489,6 +785,30 @@ internal sealed class ClaudeUsageService : IDisposable
         }
 
         return Path.Combine(userProfile, ".claude");
+    }
+
+    private static string? ReadEnvironmentOAuthToken()
+    {
+        return NormalizeToken(Environment.GetEnvironmentVariable(ClaudeCodeOAuthTokenEnvironmentVariable)) ??
+            NormalizeToken(Environment.GetEnvironmentVariable(
+                ClaudeCodeOAuthTokenEnvironmentVariable,
+                EnvironmentVariableTarget.User)) ??
+            NormalizeToken(Environment.GetEnvironmentVariable(
+                ClaudeCodeOAuthTokenEnvironmentVariable,
+                EnvironmentVariableTarget.Machine));
+    }
+
+    private static string? NormalizeToken(string? token)
+    {
+        string? trimmed = token?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
+
+    private static string CreateAuthFingerprint(string accessToken)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(accessToken);
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(bytes);
+        return Convert.ToHexString(hash);
     }
 
     private static string NormalizeConfigDirectory(string configDir)
@@ -630,6 +950,280 @@ internal sealed class ClaudeUsageService : IDisposable
         return false;
     }
 
+    private static bool AllowsUserProfileScope(JsonElement oauth)
+    {
+        if (!TryGetProperty(oauth, "scopes", out JsonElement scopes))
+        {
+            return true;
+        }
+
+        if (scopes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement scope in scopes.EnumerateArray())
+            {
+                if (scope.ValueKind == JsonValueKind.String &&
+                    IsUserProfileScope(scope.GetString()))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (scopes.ValueKind == JsonValueKind.String)
+        {
+            return ContainsUserProfileScope(scopes.GetString());
+        }
+
+        return false;
+    }
+
+    private static string ReadScopes(JsonElement oauth)
+    {
+        if (!TryGetProperty(oauth, "scopes", out JsonElement scopes))
+        {
+            return string.Empty;
+        }
+
+        if (scopes.ValueKind == JsonValueKind.String)
+        {
+            return scopes.GetString()?.Trim() ?? string.Empty;
+        }
+
+        return scopes.ValueKind == JsonValueKind.Array
+            ? string.Join(' ', scopes.EnumerateArray()
+                .Where(scope => scope.ValueKind == JsonValueKind.String)
+                .Select(scope => scope.GetString())
+                .Where(scope => !string.IsNullOrWhiteSpace(scope)))
+            : string.Empty;
+    }
+
+    private static ClaudeCredentials? TryReadCredentials(JsonObject root)
+    {
+        if (!TryGetObject(root, "claudeAiOauth", out JsonObject? oauth))
+        {
+            return null;
+        }
+
+        string accessToken = TryReadString(oauth!, "accessToken", "access_token") ?? string.Empty;
+        string refreshToken = TryReadString(oauth!, "refreshToken", "refresh_token") ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return null;
+        }
+
+        DateTimeOffset expiresAt = TryReadEpochMilliseconds(oauth!, out DateTimeOffset parsedExpiresAt)
+            ? parsedExpiresAt
+            : DateTimeOffset.MaxValue;
+        string subscriptionType = TryReadString(oauth!, "subscriptionType", "subscription_type") ?? string.Empty;
+        bool allowsUserProfileScope = AllowsUserProfileScope(oauth!);
+        string scopes = ReadScopes(oauth!);
+
+        return new ClaudeCredentials(
+            accessToken,
+            refreshToken,
+            expiresAt,
+            subscriptionType,
+            allowsUserProfileScope,
+            scopes);
+    }
+
+    private static bool AllowsUserProfileScope(JsonObject oauth)
+    {
+        if (!TryGetProperty(oauth, "scopes", out JsonNode? scopes))
+        {
+            return true;
+        }
+
+        if (scopes is JsonArray array)
+        {
+            foreach (JsonNode? scope in array)
+            {
+                if (scope is JsonValue value &&
+                    value.TryGetValue(out string? text) &&
+                    IsUserProfileScope(text))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (scopes is JsonValue value &&
+            value.TryGetValue(out string? text))
+        {
+            return ContainsUserProfileScope(text);
+        }
+
+        return false;
+    }
+
+    private static string ReadScopes(JsonObject oauth)
+    {
+        if (!TryGetProperty(oauth, "scopes", out JsonNode? scopes))
+        {
+            return string.Empty;
+        }
+
+        if (scopes is JsonValue value && value.TryGetValue(out string? text))
+        {
+            return text?.Trim() ?? string.Empty;
+        }
+
+        return scopes is JsonArray array
+            ? string.Join(' ', array
+                .OfType<JsonValue>()
+                .Select(scope => scope.TryGetValue(out string? text) ? text : null)
+                .Where(scope => !string.IsNullOrWhiteSpace(scope)))
+            : string.Empty;
+    }
+
+    private static bool ContainsUserProfileScope(string? scopes)
+    {
+        if (string.IsNullOrWhiteSpace(scopes))
+        {
+            return false;
+        }
+
+        string[] parts = scopes.Split([' ', ',', ';'], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Any(IsUserProfileScope);
+    }
+
+    private static bool IsUserProfileScope(string? scope)
+    {
+        return string.Equals(scope?.Trim(), "user:profile", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryReadEpochMilliseconds(JsonObject obj, out DateTimeOffset value)
+    {
+        if (TryReadLong(obj, out long epoch, "expiresAt", "expires_at"))
+        {
+            try
+            {
+                value = DateTimeOffset.FromUnixTimeMilliseconds(epoch);
+                return true;
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                Debug.WriteLine(ex);
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? TryReadString(JsonObject obj, params string[] propertyNames)
+    {
+        foreach (string propertyName in propertyNames)
+        {
+            if (TryGetProperty(obj, propertyName, out JsonNode? value) &&
+                value is JsonValue jsonValue &&
+                jsonValue.TryGetValue(out string? text))
+            {
+                return text;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryReadLong(JsonObject obj, out long number, params string[] propertyNames)
+    {
+        foreach (string propertyName in propertyNames)
+        {
+            if (!TryGetProperty(obj, propertyName, out JsonNode? value) ||
+                value is not JsonValue jsonValue)
+            {
+                continue;
+            }
+
+            if (jsonValue.TryGetValue(out long longValue))
+            {
+                number = longValue;
+                return true;
+            }
+
+            if (jsonValue.TryGetValue(out string? text) &&
+                long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+            {
+                return true;
+            }
+        }
+
+        number = 0;
+        return false;
+    }
+
+    private static bool TryGetObject(JsonObject obj, string propertyName, out JsonObject? value)
+    {
+        if (TryGetProperty(obj, propertyName, out JsonNode? node) &&
+            node is JsonObject jsonObject)
+        {
+            value = jsonObject;
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static bool TryGetProperty(JsonObject obj, string propertyName, out JsonNode? value)
+    {
+        foreach (KeyValuePair<string, JsonNode?> property in obj)
+        {
+            if (string.Equals(property.Key, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static void SetProperty(JsonObject obj, string propertyName, string value, params string[] aliases)
+    {
+        string targetName = FindExistingPropertyName(obj, propertyName, aliases) ?? propertyName;
+        obj[targetName] = JsonValue.Create(value);
+    }
+
+    private static void SetProperty(JsonObject obj, string propertyName, long value, params string[] aliases)
+    {
+        string targetName = FindExistingPropertyName(obj, propertyName, aliases) ?? propertyName;
+        obj[targetName] = JsonValue.Create(value);
+    }
+
+    private static string? FindExistingPropertyName(JsonObject obj, string propertyName, params string[] aliases)
+    {
+        if (TryFindPropertyName(obj, propertyName, out string? existingName))
+        {
+            return existingName;
+        }
+
+        foreach (string alias in aliases)
+        {
+            if (TryFindPropertyName(obj, alias, out existingName))
+            {
+                return existingName;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryFindPropertyName(JsonObject obj, string propertyName, out string? existingName)
+    {
+        foreach (KeyValuePair<string, JsonNode?> property in obj)
+        {
+            if (string.Equals(property.Key, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                existingName = property.Key;
+                return true;
+            }
+        }
+
+        existingName = null;
+        return false;
+    }
+
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement value)
     {
         if (element.ValueKind == JsonValueKind.Object)
@@ -648,6 +1242,21 @@ internal sealed class ClaudeUsageService : IDisposable
         return false;
     }
 
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+        }
+    }
+
     public void Dispose()
     {
         _httpClient.Dispose();
@@ -657,7 +1266,24 @@ internal sealed class ClaudeUsageService : IDisposable
         string AccessToken,
         string RefreshToken,
         DateTimeOffset ExpiresAt,
-        string SubscriptionType);
+        string SubscriptionType,
+        bool AllowsUserProfileScope,
+        string Scopes);
+
+    private sealed record ClaudeRefreshPersistenceResult(
+        ClaudeCredentials Credentials,
+        bool RememberInMemory)
+    {
+        public static ClaudeRefreshPersistenceResult UseInMemory(ClaudeCredentials credentials)
+        {
+            return new ClaudeRefreshPersistenceResult(credentials, true);
+        }
+
+        public static ClaudeRefreshPersistenceResult UseDisk(ClaudeCredentials credentials)
+        {
+            return new ClaudeRefreshPersistenceResult(credentials, false);
+        }
+    }
 
     private sealed record ClaudeUsageSnapshot(
         int RemainingPercent,
@@ -673,6 +1299,8 @@ internal sealed class ClaudeUsageService : IDisposable
         public ClaudeUsageSnapshot? CachedUsage;
         public ClaudeCredentials? RefreshedCredentials;
         public string? RefreshedCredentialsSourceRefreshToken;
+        public string? CachedUsageAuthFingerprint;
+        public string? BackoffAuthFingerprint;
         public DateTimeOffset LastSuccessfulFetch = DateTimeOffset.MinValue;
         public DateTimeOffset NextAllowedFetch = DateTimeOffset.MinValue;
         public TimeSpan FailureBackoff = InitialBackoff;
@@ -680,12 +1308,20 @@ internal sealed class ClaudeUsageService : IDisposable
 
     private sealed class ClaudeUsageRequestException : Exception
     {
-        public ClaudeUsageRequestException(string message, RetryConditionHeaderValue? retryAfter = null)
+        public ClaudeUsageRequestException(
+            string message,
+            RetryConditionHeaderValue? retryAfter = null,
+            bool RequiresUserProfileScope = false,
+            bool RequiresLogin = false)
             : base(message)
         {
             RetryAfter = retryAfter;
+            this.RequiresUserProfileScope = RequiresUserProfileScope;
+            this.RequiresLogin = RequiresLogin;
         }
 
         public RetryConditionHeaderValue? RetryAfter { get; }
+        public bool RequiresUserProfileScope { get; }
+        public bool RequiresLogin { get; }
     }
 }

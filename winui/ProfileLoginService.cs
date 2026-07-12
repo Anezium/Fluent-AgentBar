@@ -52,12 +52,17 @@ internal static class ProfileLoginService
         return startInfo;
     }
 
-    private static ProcessStartInfo CreateClaudeLoginStartInfo(string claudeConfigDir)
+    internal static ProcessStartInfo CreateClaudeLoginStartInfo(string claudeConfigDir)
     {
         ProcessStartInfo startInfo = CreateCmdStartInfo(createNoWindow: false);
         startInfo.ArgumentList.Add("/D");
         startInfo.ArgumentList.Add("/K");
         startInfo.ArgumentList.Add("claude /login");
+        // A setup-token is inference-only by default and takes precedence over
+        // the profile credentials in Claude Code. Clear it for this child so
+        // the Login action always creates a full user:profile session.
+        startInfo.Environment["CLAUDE_CODE_OAUTH_TOKEN"] = string.Empty;
+        startInfo.Environment["CLAUDE_CODE_OAUTH_SCOPES"] = string.Empty;
         startInfo.Environment["CLAUDE_CONFIG_DIR"] = claudeConfigDir;
         startInfo.WorkingDirectory = claudeConfigDir;
         return startInfo;
