@@ -21,5 +21,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FluentAgentBar.csproj" />
+    <ProjectReference Include="..\WpfTaskbarWidget\WpfTaskbarWidget.csproj" />
   </ItemGroup>
 </Project>

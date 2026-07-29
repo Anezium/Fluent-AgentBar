@@ -8,7 +8,7 @@ public partial class App : Application
     private SingleInstanceService? _singleInstanceService;
     private UsageService? _usageService;
     private FlyoutWindow? _flyoutWindow;
-    private readonly Dictionary<IntPtr, TaskbarWidgetWindow> _taskbarWidgetWindows = [];
+    private readonly Dictionary<IntPtr, TaskbarWidgetHost> _taskbarWidgetWindows = [];
     private DispatcherQueueTimer? _widgetRecoveryTimer;
     private DispatcherQueueTimer? _taskbarReconcileTimer;
     private DispatcherQueue? _dispatcherQueue;
@@ -66,7 +66,7 @@ public partial class App : Application
 
         foreach (IntPtr hwnd in plan.Close)
         {
-            if (_taskbarWidgetWindows.Remove(hwnd, out TaskbarWidgetWindow? widget))
+            if (_taskbarWidgetWindows.Remove(hwnd, out TaskbarWidgetHost? widget))
             {
                 UnsubscribeTaskbarWidget(widget);
                 widget.Close();
@@ -75,10 +75,24 @@ public partial class App : Application
 
         foreach (TaskbarTarget target in plan.Create)
         {
-            TaskbarWidgetWindow widget = new(_usageService, target);
-            SubscribeTaskbarWidget(widget);
-            _taskbarWidgetWindows[target.Hwnd] = widget;
-            widget.ShowNoActivate();
+            TaskbarWidgetHost? widget = null;
+            try
+            {
+                widget = new TaskbarWidgetHost(_usageService, target);
+                SubscribeTaskbarWidget(widget);
+                _taskbarWidgetWindows[target.Hwnd] = widget;
+                widget.ShowNoActivate();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+                _taskbarWidgetWindows.Remove(target.Hwnd);
+                if (widget is not null)
+                {
+                    UnsubscribeTaskbarWidget(widget);
+                    widget.Close();
+                }
+            }
         }
 
         if (currentTaskbars.Count == 0 || _taskbarWidgetWindows.Count == 0)
@@ -91,7 +105,7 @@ public partial class App : Application
         }
     }
 
-    private void SubscribeTaskbarWidget(TaskbarWidgetWindow widget)
+    private void SubscribeTaskbarWidget(TaskbarWidgetHost widget)
     {
         widget.UsageRequested += OnTaskbarUsageRequested;
         widget.ExitRequested += OnExitRequested;
@@ -99,7 +113,7 @@ public partial class App : Application
         widget.Closed += OnTaskbarWidgetClosed;
     }
 
-    private void UnsubscribeTaskbarWidget(TaskbarWidgetWindow widget)
+    private void UnsubscribeTaskbarWidget(TaskbarWidgetHost widget)
     {
         widget.UsageRequested -= OnTaskbarUsageRequested;
         widget.ExitRequested -= OnExitRequested;
@@ -126,11 +140,15 @@ public partial class App : Application
 
     // Explorer restarts and monitor changes can remove or replace taskbar HWNDs.
     // Wait for the shell to settle, then reconcile without creating duplicates.
-    private void OnTaskbarWidgetClosed(object sender, WindowEventArgs args)
+    private void OnTaskbarWidgetClosed(object? sender, EventArgs args)
     {
-        if (sender is TaskbarWidgetWindow widget)
+        if (sender is TaskbarWidgetHost widget)
         {
             RemoveTaskbarWidget(widget);
+            // Close() is idempotent; on the unexpected-close path nobody else
+            // stops the host's cycle timer or detaches its static-event
+            // subscriptions, so the host would otherwise leak and keep ticking.
+            widget.Close();
         }
 
         if (_exiting)
@@ -146,6 +164,12 @@ public partial class App : Application
         if (_exiting)
         {
             return;
+        }
+
+        if (sender is TaskbarWidgetHost widget)
+        {
+            RemoveTaskbarWidget(widget);
+            widget.Close();
         }
 
         ReconcileTaskbarWidgets();
@@ -235,7 +259,15 @@ public partial class App : Application
         }
 
         _flyoutWindow ??= new FlyoutWindow(_usageService);
-        _flyoutWindow.ToggleNoActivate();
+        if (sender is TaskbarWidgetHost widget &&
+            widget.TryGetPillScreenRect(out NativeMethods.Rect pillRect))
+        {
+            _flyoutWindow.ToggleNoActivate(widget.TargetHwnd, pillRect);
+        }
+        else
+        {
+            _flyoutWindow.ToggleNoActivate();
+        }
     }
 
     private void HandleActivationIntent(ActivationIntent intent)
@@ -270,13 +302,13 @@ public partial class App : Application
         _usageService?.Dispose();
     }
 
-    private void RemoveTaskbarWidget(TaskbarWidgetWindow widget)
+    private void RemoveTaskbarWidget(TaskbarWidgetHost widget)
     {
         UnsubscribeTaskbarWidget(widget);
         if (!_taskbarWidgetWindows.Remove(widget.TargetHwnd))
         {
             IntPtr keyToRemove = IntPtr.Zero;
-            foreach (KeyValuePair<IntPtr, TaskbarWidgetWindow> pair in _taskbarWidgetWindows)
+            foreach (KeyValuePair<IntPtr, TaskbarWidgetHost> pair in _taskbarWidgetWindows)
             {
                 if (ReferenceEquals(pair.Value, widget))
                 {
@@ -294,7 +326,7 @@ public partial class App : Application
 
     private void CloseTaskbarWidgets()
     {
-        foreach (TaskbarWidgetWindow widget in _taskbarWidgetWindows.Values.ToList())
+        foreach (TaskbarWidgetHost widget in _taskbarWidgetWindows.Values.ToList())
         {
             UnsubscribeTaskbarWidget(widget);
             widget.Close();

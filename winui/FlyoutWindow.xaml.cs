@@ -37,6 +37,9 @@ public sealed partial class FlyoutWindow : Window
     private bool _isSwitchingCodexProfile;
     private bool _heightUpdatePending;
     private bool _pendingHeightAnimation;
+    private IntPtr _anchorTaskbarHwnd;
+    private NativeMethods.Rect _anchorWidgetRect;
+    private bool _hasWidgetAnchor;
 
     public IReadOnlyList<ProviderUsage> Providers { get; private set; } = MockUsageData.CreateProviders();
     public string LastRefreshText { get; private set; } = "Last refresh --";
@@ -95,8 +98,24 @@ public sealed partial class FlyoutWindow : Window
 
     public void ShowNoActivate()
     {
+        _anchorTaskbarHwnd = IntPtr.Zero;
+        _hasWidgetAnchor = false;
+        ShowNoActivateCore();
+    }
+
+    internal void ShowNoActivate(IntPtr taskbarHwnd, NativeMethods.Rect widgetRect)
+    {
+        _anchorTaskbarHwnd = taskbarHwnd;
+        _anchorWidgetRect = widgetRect;
+        _hasWidgetAnchor = true;
+        ShowNoActivateCore();
+    }
+
+    private void ShowNoActivateCore()
+    {
         RefreshConfigBindings();
         SetCodexSwitchStatus(string.Empty, animate: false);
+        StopCloseAnimation();
         _isClosing = false;
         _mouseWasDown = true;
         _shownAt = DateTimeOffset.Now;
@@ -110,6 +129,7 @@ public sealed partial class FlyoutWindow : Window
 
         if (Shell.Resources["OpenStoryboard"] is Storyboard storyboard)
         {
+            storyboard.Stop();
             storyboard.Begin();
         }
 
@@ -261,13 +281,28 @@ public sealed partial class FlyoutWindow : Window
 
     public void ToggleNoActivate()
     {
+        _anchorTaskbarHwnd = IntPtr.Zero;
+        _hasWidgetAnchor = false;
+        ToggleNoActivateCore();
+    }
+
+    internal void ToggleNoActivate(IntPtr taskbarHwnd, NativeMethods.Rect widgetRect)
+    {
+        _anchorTaskbarHwnd = taskbarHwnd;
+        _anchorWidgetRect = widgetRect;
+        _hasWidgetAnchor = true;
+        ToggleNoActivateCore();
+    }
+
+    private void ToggleNoActivateCore()
+    {
         if (NativeMethods.IsWindowVisible(_hwnd) && !_isClosing)
         {
             BeginHide();
             return;
         }
 
-        ShowNoActivate();
+        ShowNoActivateCore();
     }
 
     private void ConfigurePresenter()
@@ -300,11 +335,13 @@ public sealed partial class FlyoutWindow : Window
 
     private void PositionAboveTaskbar(bool animate = false)
     {
-        NativeMethods.Rect taskbarRect = NativeMethods.GetPrimaryTaskbarRect();
-        NativeMethods.Rect trayRect = NativeMethods.TryGetTrayRect(taskbarRect);
-        NativeMethods.Rect monitorRect = NativeMethods.GetMonitorRectForWindow(
-            NativeMethods.FindPrimaryTaskbar()
-        );
+        IntPtr taskbar = GetAnchorTaskbar();
+        NativeMethods.Rect taskbarRect =
+            taskbar != IntPtr.Zero && NativeMethods.GetWindowRect(taskbar, out NativeMethods.Rect currentTaskbarRect)
+                ? currentTaskbarRect
+                : NativeMethods.GetPrimaryTaskbarRect();
+        NativeMethods.Rect trayRect = NativeMethods.TryGetTrayRect(taskbar, taskbarRect);
+        NativeMethods.Rect monitorRect = NativeMethods.GetMonitorRectForWindow(taskbar);
         SizeInt32 physicalSize = GetPhysicalFlyoutSize();
 
         int taskbarWidth = taskbarRect.Right - taskbarRect.Left;
@@ -319,19 +356,23 @@ public sealed partial class FlyoutWindow : Window
 
         if (horizontal)
         {
-            int anchorLeft = trayRect.Left > 0 ? trayRect.Left : taskbarRect.Right - EdgeGap;
-            x = Math.Clamp(anchorLeft - physicalSize.Width - EdgeGap, monitorRect.Left + EdgeGap, monitorRect.Right - physicalSize.Width - EdgeGap);
+            int anchorRight = _hasWidgetAnchor
+                ? _anchorWidgetRect.Right
+                : (trayRect.Left > 0 ? trayRect.Left - EdgeGap : taskbarRect.Right - EdgeGap);
+            x = Math.Clamp(anchorRight - physicalSize.Width, monitorRect.Left + EdgeGap, monitorRect.Right - physicalSize.Width - EdgeGap);
             y = bottom
                 ? taskbarRect.Top - physicalSize.Height - EdgeGap
                 : taskbarRect.Bottom + EdgeGap;
         }
         else
         {
-            int anchorTop = trayRect.Top > 0 ? trayRect.Top : taskbarRect.Bottom - EdgeGap;
+            int anchorBottom = _hasWidgetAnchor
+                ? _anchorWidgetRect.Bottom
+                : (trayRect.Top > 0 ? trayRect.Top - EdgeGap : taskbarRect.Bottom - EdgeGap);
             x = right
                 ? taskbarRect.Left - physicalSize.Width - EdgeGap
                 : taskbarRect.Right + EdgeGap;
-            y = Math.Clamp(anchorTop - physicalSize.Height - EdgeGap, monitorRect.Top + EdgeGap, monitorRect.Bottom - physicalSize.Height - EdgeGap);
+            y = Math.Clamp(anchorBottom - physicalSize.Height, monitorRect.Top + EdgeGap, monitorRect.Bottom - physicalSize.Height - EdgeGap);
         }
 
         if (top)
@@ -407,7 +448,7 @@ public sealed partial class FlyoutWindow : Window
 
     private SizeInt32 GetPhysicalFlyoutSize()
     {
-        IntPtr taskbar = NativeMethods.FindPrimaryTaskbar();
+        IntPtr taskbar = GetAnchorTaskbar();
         uint dpi = taskbar != IntPtr.Zero
             ? NativeMethods.GetDpiForWindow(taskbar)
             : NativeMethods.GetDpiForWindow(_hwnd);
@@ -415,7 +456,10 @@ public sealed partial class FlyoutWindow : Window
         int physicalHeight = (int)Math.Round(_logicalHeight * scale);
 
         // Never taller than the work area above/beside the taskbar.
-        NativeMethods.Rect taskbarRect = NativeMethods.GetPrimaryTaskbarRect();
+        NativeMethods.Rect taskbarRect =
+            taskbar != IntPtr.Zero && NativeMethods.GetWindowRect(taskbar, out NativeMethods.Rect currentTaskbarRect)
+                ? currentTaskbarRect
+                : NativeMethods.GetPrimaryTaskbarRect();
         NativeMethods.Rect monitorRect = NativeMethods.GetMonitorRectForWindow(taskbar);
         int taskbarHeight = Math.Max(0, taskbarRect.Bottom - taskbarRect.Top);
         int maxHeight = (monitorRect.Bottom - monitorRect.Top) - taskbarHeight - (EdgeGap * 2);
@@ -428,6 +472,16 @@ public sealed partial class FlyoutWindow : Window
             (int)Math.Round(FlyoutLogicalWidth * scale),
             physicalHeight
         );
+    }
+
+    private IntPtr GetAnchorTaskbar()
+    {
+        if (_anchorTaskbarHwnd != IntPtr.Zero && NativeMethods.IsWindow(_anchorTaskbarHwnd))
+        {
+            return _anchorTaskbarHwnd;
+        }
+
+        return NativeMethods.FindPrimaryTaskbar();
     }
 
     // PointerPressed instead of Tapped: rapid clicks make the gesture
@@ -502,6 +556,17 @@ public sealed partial class FlyoutWindow : Window
 
     private void OnOutsideClickTimerTick(DispatcherQueueTimer sender, object args)
     {
+        // The runtime verifier posts deterministic widget messages while sharing
+        // the interactive desktop. Ignore unrelated physical clicks only in
+        // that explicit test mode so they cannot dismiss the candidate flyout.
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("FLUENTAGENTBAR_ATTACH_DESKTOP"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
         bool mouseDown = NativeMethods.IsAnyMouseButtonDown();
         bool clickedNow = mouseDown && !_mouseWasDown;
         _mouseWasDown = mouseDown;
@@ -517,13 +582,11 @@ public sealed partial class FlyoutWindow : Window
             return;
         }
 
-        bool inside =
-            cursor.X >= rect.Left &&
-            cursor.X <= rect.Right &&
-            cursor.Y >= rect.Top &&
-            cursor.Y <= rect.Bottom;
-
-        if (!inside)
+        if (FlyoutDismissHitTest.ShouldDismiss(
+                cursor,
+                rect,
+                _hasWidgetAnchor,
+                _anchorWidgetRect))
         {
             BeginHide();
         }
@@ -541,20 +604,40 @@ public sealed partial class FlyoutWindow : Window
         _outsideClickTimer.Stop();
         StopResizeAnimation();
 
+        if (Shell.Resources["OpenStoryboard"] is Storyboard openStoryboard)
+        {
+            openStoryboard.Stop();
+        }
+
         if (Shell.Resources["CloseStoryboard"] is Storyboard storyboard)
         {
+            storyboard.Stop();
             storyboard.Begin();
         }
         else
         {
             NativeMethods.ShowWindow(_hwnd, NativeMethods.SW_HIDE);
+            _isClosing = false;
         }
     }
 
     private void OnCloseStoryboardCompleted(object? sender, object e)
     {
+        if (!_isClosing)
+        {
+            return;
+        }
+
         NativeMethods.ShowWindow(_hwnd, NativeMethods.SW_HIDE);
         _isClosing = false;
+    }
+
+    private void StopCloseAnimation()
+    {
+        if (Shell.Resources["CloseStoryboard"] is Storyboard storyboard)
+        {
+            storyboard.Stop();
+        }
     }
 
     private void OnClosed(object sender, WindowEventArgs args)

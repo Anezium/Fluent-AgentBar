@@ -14,4 +14,6 @@ winui/bin/
 winui/obj/
 winui/**/bin/
 winui/**/obj/
+tools/**/bin/
+tools/**/obj/
 .codex-build/

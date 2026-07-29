@@ -20,14 +20,10 @@ $artifactDir = Join-Path $artifactRoot $artifactName
 $zipPath = "$artifactDir.zip"
 
 function Assert-UnderRepo([string]$PathToCheck) {
-    $parent = Split-Path -Parent $PathToCheck
-    $resolvedParent = if (Test-Path $parent) {
-        (Resolve-Path $parent).Path
-    } else {
-        (Resolve-Path (Split-Path -Parent $parent)).Path
-    }
-
-    if (!$resolvedParent.StartsWith($repoRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    $resolvedTarget = [IO.Path]::GetFullPath($PathToCheck)
+    $repoPrefix = $repoRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) +
+        [IO.Path]::DirectorySeparatorChar
+    if (!$resolvedTarget.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to write outside repo: $PathToCheck"
     }
 }
@@ -41,7 +37,7 @@ if (Test-Path $releaseBin) {
 
 dotnet build $projectPath -c $configuration -p:Platform=$platform
 
-foreach ($requiredFile in @("FluentAgentBar.exe", "FluentAgentBar.dll", "FluentAgentBar.pri", "App.xbf", "TaskbarWidgetWindow.xbf")) {
+foreach ($requiredFile in @("FluentAgentBar.exe", "FluentAgentBar.dll", "WpfTaskbarWidget.dll", "FluentAgentBar.pri", "App.xbf")) {
     $path = Join-Path $releaseBin $requiredFile
     if (!(Test-Path $path)) {
         throw "Release output is missing required WinUI file: $requiredFile"

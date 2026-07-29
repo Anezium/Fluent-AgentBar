@@ -9,7 +9,8 @@ This app provides:
 
 - WinUI 3 taskbar widget and DPI-aware flyout for high-resolution Windows displays.
 - Windows 11 Fluent surfaces with Mica-like settings and Acrylic-like flyouts.
-- Explorer taskbar integration through top-level owned transparent widgets.
+- Explorer taskbar integration through WPF `WS_CHILD` widgets embedded in each
+  taskbar, with automatic owned/topmost fallback if child adoption fails.
 - One taskbar presence per detected primary/secondary Windows taskbar.
 - Multi-provider profile support through separate `CODEX_HOME` / `CLAUDE_CONFIG_DIR` directories.
 - Codex account discovery through `codex app-server`.
