@@ -757,7 +757,10 @@ internal sealed class ClaudeUsageService : IDisposable
             throw new ClaudeUsageRequestException("Claude usage response is missing utilization.");
         }
 
-        return utilization <= 1.0 ? utilization * 100 : utilization;
+        // The OAuth usage endpoint reports percentage points in the 0..100
+        // range. Values at or below 1 are therefore valid low utilization,
+        // not fractional ratios (1.0 means 1% used, not 100% used).
+        return utilization;
     }
 
     private static int ClampPercent(double value)

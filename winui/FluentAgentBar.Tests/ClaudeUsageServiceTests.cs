@@ -363,6 +363,40 @@ public sealed class ClaudeUsageServiceTests
         }
     }
 
+    [Theory]
+    [InlineData(0.0, 100)]
+    [InlineData(0.25, 100)]
+    [InlineData(1.0, 99)]
+    [InlineData(1.01, 99)]
+    [InlineData(100.0, 0)]
+    public async Task FetchAsync_InterpretsOAuthUtilizationAsPercentagePoints(
+        double utilization,
+        int expectedRemainingPercent)
+    {
+        string configDir = CreateTempDirectory();
+        try
+        {
+            string responseJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                five_hour = new { utilization },
+                seven_day = new { utilization }
+            });
+            using ClaudeUsageService service = new(CreateHttpClient(
+                _ => Task.FromResult(JsonResponse(responseJson))),
+                () => "env-access");
+
+            ProfileUsage usage = await service.FetchAsync(configDir, CancellationToken.None);
+
+            Assert.True(usage.IsAvailable);
+            Assert.Equal(expectedRemainingPercent, usage.RemainingPercent);
+            Assert.Equal(expectedRemainingPercent, usage.WeeklyPercent);
+        }
+        finally
+        {
+            TryDeleteDirectory(configDir);
+        }
+    }
+
     private static HttpClient CreateHttpClient(Func<HttpRequestMessage, Task<HttpResponseMessage>> sendAsync)
     {
         return new HttpClient(new DelegateHandler(sendAsync));
