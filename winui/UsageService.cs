@@ -243,6 +243,9 @@ public sealed class UsageService : IDisposable
         try
         {
             EnsureCodexProfileHome(codexHome);
+            CodexAccountSwitchService.TrySynchronizeProfileAuthFromCodexHome(
+                profile,
+                CodexAccountSwitchService.GetDefaultCodexHome());
         }
         catch (Exception ex)
         {
@@ -283,7 +286,8 @@ public sealed class UsageService : IDisposable
             if (completed == timeoutTask)
             {
                 KillProcess(process);
-                return Unavailable(profile);
+                await WaitForReaderAsync(stderrTask);
+                return Unavailable(profile, loginRequired: IndicatesCodexLoginRequired(stderr.ToString()));
             }
 
             CloseStandardInput(process);
@@ -303,10 +307,13 @@ public sealed class UsageService : IDisposable
             if (stdoutLines.Count == 0)
             {
                 Debug.WriteLine(stderr.ToString());
-                return Unavailable(profile);
+                return Unavailable(profile, loginRequired: IndicatesCodexLoginRequired(stderr.ToString()));
             }
 
-            return ParseCodexProfile(profile, stdoutLines);
+            ProfileUsage usage = ParseCodexProfile(profile, stdoutLines);
+            return !usage.IsAvailable && IndicatesCodexLoginRequired(stderr.ToString())
+                ? usage with { Plan = "Login Required" }
+                : usage;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -336,7 +343,7 @@ public sealed class UsageService : IDisposable
         };
     }
 
-    private static ProcessStartInfo CreateCodexAppServerStartInfo(string codexHome)
+    internal static ProcessStartInfo CreateCodexAppServerStartInfo(string codexHome)
     {
         string cmdPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
         ProcessStartInfo startInfo = new()
@@ -358,7 +365,7 @@ public sealed class UsageService : IDisposable
         startInfo.ArgumentList.Add("/D");
         startInfo.ArgumentList.Add("/S");
         startInfo.ArgumentList.Add("/C");
-        startInfo.ArgumentList.Add("codex -s read-only -a untrusted app-server");
+        startInfo.ArgumentList.Add("codex -s read-only -a never app-server");
         startInfo.Environment["CODEX_HOME"] = codexHome;
         return startInfo;
     }
@@ -496,6 +503,10 @@ public sealed class UsageService : IDisposable
                     !TryGetProperty(root, "result", out JsonElement result))
                 {
                     rateLimitError = true;
+                    if (IndicatesCodexLoginRequired(line))
+                    {
+                        plan = "Login Required";
+                    }
                     continue;
                 }
 
@@ -768,6 +779,16 @@ public sealed class UsageService : IDisposable
         return (int)Math.Clamp(Math.Round(value), 0, 100);
     }
 
+    private static bool IndicatesCodexLoginRequired(string text)
+    {
+        return text.Contains("invalid_refresh_token", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("sign in again", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("log in", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("login required", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("token could not be refreshed", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool TryFindNumber(JsonElement element, out double number, params string[] propertyNames)
     {
         foreach (string propertyName in propertyNames)
@@ -843,12 +864,25 @@ public sealed class UsageService : IDisposable
         return Unavailable(profile, MockUsageData.CodexAccentColor);
     }
 
-    private static ProfileUsage Unavailable(ProfileConfig profile, Windows.UI.Color accentColor)
+    private static ProfileUsage Unavailable(ProfileConfig profile, bool loginRequired)
     {
-        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, accentColor)
+        return Unavailable(
+            profile,
+            MockUsageData.CodexAccentColor,
+            loginRequired ? "Login Required" : string.Empty);
+    }
+
+    private static ProfileUsage Unavailable(
+        ProfileConfig profile,
+        Windows.UI.Color accentColor,
+        string plan = "")
+    {
+        return new ProfileUsage(profile.Label, string.Empty, plan, 0, 0, false, accentColor)
         {
             Provider = profile.Provider,
             Home = profile.Home,
+            HasPrimaryQuota = false,
+            HasWeeklyQuota = false,
             HasCodexAuth = AppConfigStore.IsProvider(profile, "codex") &&
                 CodexAccountSwitchService.HasProfileAuth(profile),
             IsActiveCodexAccount = AppConfigStore.IsProvider(profile, "codex") &&

@@ -108,6 +108,25 @@ public sealed class CodexUsageParsingTests
         Assert.Single(Assert.Single(usage.DisplayQuotaGroups).Windows);
     }
 
+    [Fact]
+    public void ParseCodexProfile_WhenRateLimitAuthFails_ShowsLoginRequiredWithoutEmptyBars()
+    {
+        ProfileUsage usage = UsageService.ParseCodexProfile(
+            Profile(),
+            [
+                """
+                {"id":3,"error":{"code":-32603,"message":"Your access token could not be refreshed. Please log in again."}}
+                """
+            ]);
+
+        Assert.False(usage.IsAvailable);
+        Assert.Equal("Login Required", usage.Plan);
+        Assert.False(usage.HasPrimaryQuota);
+        Assert.False(usage.HasWeeklyQuota);
+        Assert.Empty(Assert.Single(usage.DisplayQuotaGroups).Windows);
+        Assert.Equal("Sign in again from Settings to restore usage.", usage.UsageStatusText);
+    }
+
     private static ProfileConfig Profile()
     {
         return new ProfileConfig

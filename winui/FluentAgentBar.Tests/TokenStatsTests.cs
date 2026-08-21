@@ -50,6 +50,8 @@ public sealed class TokenStatsTests
     [Theory]
     [InlineData("claude-fable-5", "2026-07-04", 73.50)]
     [InlineData("claude-fable-5-20260609", "2026-07-04", 73.50)]
+    [InlineData("claude-opus-5", "2026-07-24", 36.75)]
+    [InlineData("claude-opus-5-20260724", "2026-07-24", 36.75)]
     [InlineData("claude-sonnet-5", "2026-07-04", 14.70)]
     [InlineData("claude-sonnet-5", "2026-09-01", 22.05)]
     [InlineData("claude-sonnet-5-20260630", "2026-09-01", 22.05)]
