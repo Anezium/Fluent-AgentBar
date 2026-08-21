@@ -241,6 +241,14 @@ public sealed record ProfileUsage(
     public string WeeklyText => IsAvailable && HasWeeklyQuota
         ? $"{Math.Clamp(WeeklyPercent, 0, 100)}%"
         : "--";
+    public string UsageStatusText => IsAvailable
+        ? string.Empty
+        : Plan.Contains("Login Required", StringComparison.OrdinalIgnoreCase)
+            ? "Sign in again from Settings to restore usage."
+            : "Usage unavailable. Refresh, then sign in again if it persists.";
+    public Visibility UsageStatusVisibility => IsAvailable
+        ? Visibility.Collapsed
+        : Visibility.Visible;
     public Brush AccentBrush => new SolidColorBrush(AccentColor);
     public bool IsCodexProfile => AppConfigStore.NormalizeProvider(Provider) == "codex";
     public bool CanSwitchCodexAccount => IsCodexProfile && HasCodexAuth && !IsActiveCodexAccount;
@@ -386,6 +394,8 @@ internal static class MockUsageData
         {
             Provider = profile.Provider,
             Home = profile.Home,
+            HasPrimaryQuota = false,
+            HasWeeklyQuota = false,
             HasCodexAuth = CodexAccountSwitchService.HasProfileAuth(profile),
             IsActiveCodexAccount = CodexAccountSwitchService.IsActiveProfile(profile)
         };

@@ -747,7 +747,11 @@ internal sealed class ClaudeUsageService : IDisposable
             0,
             0,
             false,
-            MockUsageData.ClaudeAccentColor);
+            MockUsageData.ClaudeAccentColor)
+        {
+            HasPrimaryQuota = false,
+            HasWeeklyQuota = false
+        };
     }
 
     private static double ReadUtilizationPercent(JsonElement element)

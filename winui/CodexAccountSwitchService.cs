@@ -85,15 +85,52 @@ internal static class CodexAccountSwitchService
             return;
         }
 
-        string tempPath = Path.Combine(codexHome, $"auth.json.{Guid.NewGuid():N}.tmp");
+        CopyAuthFile(sourceAuthPath, targetAuthPath);
+    }
+
+    internal static bool TrySynchronizeProfileAuthFromCodexHome(ProfileConfig profile, string codexHome)
+    {
         try
         {
-            File.Copy(sourceAuthPath, tempPath, overwrite: true);
-            File.Move(tempPath, targetAuthPath, overwrite: true);
+            if (!AppConfigStore.IsProvider(profile, "codex"))
+            {
+                return false;
+            }
+
+            string profileAuthPath = ProfileAuthPath(profile);
+            string activeAuthPath = Path.Combine(codexHome, "auth.json");
+            if (!File.Exists(profileAuthPath) || !File.Exists(activeAuthPath))
+            {
+                return false;
+            }
+
+            if (Path.GetFullPath(profileAuthPath).Equals(
+                    Path.GetFullPath(activeAuthPath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            AuthIdentity? profileIdentity = TryReadAuthIdentity(profileAuthPath);
+            AuthIdentity? activeIdentity = TryReadAuthIdentity(activeAuthPath);
+            if (profileIdentity is null || activeIdentity is null || profileIdentity != activeIdentity)
+            {
+                return false;
+            }
+
+            if (File.GetLastWriteTimeUtc(activeAuthPath) <= File.GetLastWriteTimeUtc(profileAuthPath) ||
+                FilesEqual(profileAuthPath, activeAuthPath))
+            {
+                return false;
+            }
+
+            CopyAuthFile(activeAuthPath, profileAuthPath);
+            return true;
         }
-        finally
+        catch (Exception ex)
         {
-            TryDelete(tempPath);
+            Debug.WriteLine(ex);
+            return false;
         }
     }
 
@@ -676,6 +713,24 @@ Start-Process ("shell:AppsFolder\" + $app.AppID)
         {
             Debug.WriteLine(ex);
             return false;
+        }
+    }
+
+    private static void CopyAuthFile(string sourceAuthPath, string targetAuthPath)
+    {
+        string targetDirectory = Path.GetDirectoryName(targetAuthPath)
+            ?? throw new InvalidOperationException("The Codex auth destination has no parent directory.");
+        Directory.CreateDirectory(targetDirectory);
+
+        string tempPath = Path.Combine(targetDirectory, $"auth.json.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.Copy(sourceAuthPath, tempPath, overwrite: true);
+            File.Move(tempPath, targetAuthPath, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(tempPath);
         }
     }
 

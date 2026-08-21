@@ -317,6 +317,13 @@
                                                                 </DataTemplate>
                                                             </ItemsRepeater.ItemTemplate>
                                                         </ItemsRepeater>
+                                                        <TextBlock
+                                                            Margin="0,2,0,0"
+                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                            Style="{ThemeResource CaptionTextBlockStyle}"
+                                                            Text="{x:Bind UsageStatusText}"
+                                                            TextWrapping="Wrap"
+                                                            Visibility="{x:Bind UsageStatusVisibility}" />
                                                     </StackPanel>
                                                 </DataTemplate>
                                             </ItemsRepeater.ItemTemplate>

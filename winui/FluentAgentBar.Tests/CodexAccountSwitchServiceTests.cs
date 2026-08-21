@@ -49,6 +49,54 @@ public sealed class CodexAccountSwitchServiceTests
         Assert.False(CodexAccountSwitchService.IsActiveProfile(profile, homes.DefaultCodexHome));
     }
 
+    [Fact]
+    public void TrySynchronizeProfileAuthFromCodexHome_WhenActiveCopyIsNewer_UpdatesMatchingProfile()
+    {
+        using TempCodexHomes homes = TempCodexHomes.Create();
+        ProfileConfig profile = homes.CreateProfile("Work");
+        string profileAuthPath = CodexAccountSwitchService.ProfileAuthPath(profile);
+        string activeAuthPath = Path.Combine(homes.DefaultCodexHome, "auth.json");
+        File.WriteAllText(
+            profileAuthPath,
+            """{"tokens":{"account_id":"acct_work","refresh_token":"stale_refresh"}}""");
+        File.WriteAllText(
+            activeAuthPath,
+            """{"tokens":{"account_id":"acct_work","refresh_token":"fresh_refresh"}}""");
+        File.SetLastWriteTimeUtc(profileAuthPath, DateTime.UtcNow.AddMinutes(-5));
+        File.SetLastWriteTimeUtc(activeAuthPath, DateTime.UtcNow);
+
+        bool synchronized = CodexAccountSwitchService.TrySynchronizeProfileAuthFromCodexHome(
+            profile,
+            homes.DefaultCodexHome);
+
+        Assert.True(synchronized);
+        Assert.Equal(File.ReadAllText(activeAuthPath), File.ReadAllText(profileAuthPath));
+    }
+
+    [Fact]
+    public void TrySynchronizeProfileAuthFromCodexHome_WhenAccountsDiffer_LeavesProfileUntouched()
+    {
+        using TempCodexHomes homes = TempCodexHomes.Create();
+        ProfileConfig profile = homes.CreateProfile("Work");
+        string profileAuthPath = CodexAccountSwitchService.ProfileAuthPath(profile);
+        string activeAuthPath = Path.Combine(homes.DefaultCodexHome, "auth.json");
+        const string originalProfileAuth =
+            """{"tokens":{"account_id":"acct_work","refresh_token":"work_refresh"}}""";
+        File.WriteAllText(profileAuthPath, originalProfileAuth);
+        File.WriteAllText(
+            activeAuthPath,
+            """{"tokens":{"account_id":"acct_personal","refresh_token":"personal_refresh"}}""");
+        File.SetLastWriteTimeUtc(profileAuthPath, DateTime.UtcNow.AddMinutes(-5));
+        File.SetLastWriteTimeUtc(activeAuthPath, DateTime.UtcNow);
+
+        bool synchronized = CodexAccountSwitchService.TrySynchronizeProfileAuthFromCodexHome(
+            profile,
+            homes.DefaultCodexHome);
+
+        Assert.False(synchronized);
+        Assert.Equal(originalProfileAuth, File.ReadAllText(profileAuthPath));
+    }
+
     private sealed class TempCodexHomes : IDisposable
     {
         private TempCodexHomes(string root)

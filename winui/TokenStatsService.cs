@@ -62,6 +62,7 @@ internal sealed class TokenStatsService
     [
         new("claude-fable-5", 10.00, 50.00, 1.00, 12.50),
         new("claude-mythos-5", 10.00, 50.00, 1.00, 12.50),
+        new("claude-opus-5", 5.00, 25.00, 0.50, 6.25),
         new("claude-opus-4", 5.00, 25.00, 0.50, 6.25),
         new("claude-sonnet-5", 2.00, 10.00, 0.20, 2.50, EffectiveThrough: new DateTime(2026, 8, 31)),
         new("claude-sonnet-5", 3.00, 15.00, 0.30, 3.75, EffectiveFrom: new DateTime(2026, 9, 1)),
