@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.20" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <ProjectReference Include="WpfTaskbarWidget\WpfTaskbarWidget.csproj" />
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
