@@ -205,7 +205,7 @@ public sealed class UsageService : IDisposable
         }
         catch (ProviderLoginRequiredException ex)
         {
-            Debug.WriteLine(ex);
+            ProviderDiagnostics.Record(profile.Provider, profile.Label, ex);
             return Unavailable(profile, accent, "Login Required");
         }
 
@@ -289,7 +289,7 @@ public sealed class UsageService : IDisposable
         }
         catch (Exception ex)
         {
-            Debug.WriteLine(ex);
+            ProviderDiagnostics.Record(profile.Provider, profile.Label, ex);
             return Unavailable(profile, unavailableAccentColor);
         }
     }
