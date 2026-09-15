@@ -15,6 +15,9 @@ public sealed class UsageService : IDisposable
     private readonly object _processLock = new();
     private readonly HashSet<Process> _activeProcesses = [];
     private readonly ClaudeUsageService _claudeUsageService = new();
+    private readonly GeminiUsageService _geminiUsageService = new();
+    private readonly CursorUsageService _cursorUsageService = new();
+    private readonly GrokUsageService _grokUsageService = new();
     private readonly TokenStatsService _tokenStatsService = new();
     private readonly Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> _fetchCodexProfileAsync;
     private readonly Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> _fetchClaudeProfileAsync;
@@ -156,7 +159,101 @@ public sealed class UsageService : IDisposable
             providers.Add(new ProviderUsage("Claude", "A", claudeProfiles));
         }
 
+        await AddExternalProviderAsync(providers, enabledProfiles, "gemini", "G",
+            (home, token) => _geminiUsageService.FetchAsync(home, token), cancellationToken);
+        await AddExternalProviderAsync(providers, enabledProfiles, "cursor", "U",
+            (home, token) => _cursorUsageService.FetchAsync(home, token), cancellationToken);
+        await AddExternalProviderAsync(providers, enabledProfiles, "grok", "X",
+            (home, token) => _grokUsageService.FetchAsync(home, token), cancellationToken);
+
         return providers;
+    }
+
+    // Gemini, Cursor and Grok share one shape: a provider-neutral snapshot that
+    // is mapped onto ProfileUsage here so the fetchers stay UI-free.
+    private static async Task AddExternalProviderAsync(
+        List<ProviderUsage> providers,
+        IEnumerable<ProfileConfig> enabledProfiles,
+        string provider,
+        string badge,
+        Func<string, CancellationToken, Task<ProviderUsageSnapshot>> fetchSnapshotAsync,
+        CancellationToken cancellationToken)
+    {
+        Windows.UI.Color accent = MockUsageData.AccentColorFor(provider);
+        List<ProfileUsage> profiles = await FetchProfileGroupAsync(
+            enabledProfiles.Where(profile => AppConfigStore.IsProvider(profile, provider)),
+            (profile, token) => FetchExternalProfileAsync(profile, fetchSnapshotAsync, accent, token),
+            accent,
+            cancellationToken);
+
+        if (profiles.Count > 0)
+        {
+            providers.Add(new ProviderUsage(AppConfigStore.DisplayNameFor(provider), badge, profiles));
+        }
+    }
+
+    private static async Task<ProfileUsage> FetchExternalProfileAsync(
+        ProfileConfig profile,
+        Func<string, CancellationToken, Task<ProviderUsageSnapshot>> fetchSnapshotAsync,
+        Windows.UI.Color accent,
+        CancellationToken cancellationToken)
+    {
+        ProviderUsageSnapshot snapshot;
+        try
+        {
+            snapshot = await fetchSnapshotAsync(profile.Home, cancellationToken);
+        }
+        catch (ProviderLoginRequiredException ex)
+        {
+            Debug.WriteLine(ex);
+            return Unavailable(profile, accent, "Login Required");
+        }
+
+        return MapExternalSnapshot(profile, snapshot, accent);
+    }
+
+    internal static ProfileUsage MapExternalSnapshot(
+        ProfileConfig profile,
+        ProviderUsageSnapshot snapshot,
+        Windows.UI.Color accent)
+    {
+        List<QuotaGroupUsage> groups = snapshot.Groups
+            .Where(group => group.Windows.Count > 0)
+            .Select(group => new QuotaGroupUsage(
+                group.Name,
+                group.Windows
+                    .Select(window => new QuotaWindowUsage(
+                        window.Label,
+                        Math.Clamp(window.RemainingPercent, 0, 100),
+                        true,
+                        window.ResetAt,
+                        accent))
+                    .ToList()))
+            .ToList();
+
+        IReadOnlyList<QuotaWindowUsage> firstWindows = groups.FirstOrDefault()?.Windows ?? [];
+        QuotaWindowUsage? primary = firstWindows.ElementAtOrDefault(0);
+        QuotaWindowUsage? secondary = firstWindows.ElementAtOrDefault(1);
+
+        return new ProfileUsage(
+            profile.Label,
+            snapshot.Email,
+            snapshot.Plan,
+            primary?.RemainingPercent ?? 0,
+            secondary?.RemainingPercent ?? 0,
+            groups.Count > 0,
+            accent)
+        {
+            Provider = profile.Provider,
+            Home = profile.Home,
+            HasPrimaryQuota = primary is not null,
+            HasWeeklyQuota = secondary is not null,
+            PrimaryQuotaLabel = primary?.Label ?? string.Empty,
+            WeeklyQuotaLabel = secondary?.Label ?? string.Empty,
+            PrimaryResetAt = primary?.ResetAt,
+            WeeklyResetAt = secondary?.ResetAt,
+            QuotaGroups = groups.Count > 0 ? groups : null
+        };
     }
 
     private static async Task<List<ProfileUsage>> FetchProfileGroupAsync(
@@ -953,6 +1050,9 @@ public sealed class UsageService : IDisposable
         cts?.Cancel();
         KillActiveProcesses();
         _claudeUsageService.Dispose();
+        _geminiUsageService.Dispose();
+        _cursorUsageService.Dispose();
+        _grokUsageService.Dispose();
         _fetchLock.Dispose();
         cts?.Dispose();
     }

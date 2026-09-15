@@ -161,7 +161,7 @@ public sealed partial class SettingsWindow : Window
         actions.Children.Add(renameButton);
         actions.Children.Add(removeButton);
 
-        string providerName = AppConfigStore.IsProvider(profile, "claude") ? "Claude" : "Codex";
+        string providerName = AppConfigStore.DisplayNameFor(profile.Provider);
         return new CommunityToolkit.WinUI.Controls.SettingsCard
         {
             Header = profile.Label,
@@ -366,7 +366,7 @@ public sealed partial class SettingsWindow : Window
         }
 
         ProfileConfig profile = config.Profiles[profileIndex];
-        string providerName = AppConfigStore.IsProvider(profile, "claude") ? "Claude" : "Codex";
+        string providerName = AppConfigStore.DisplayNameFor(profile.Provider);
         if (!ProfileLoginService.StartLogin(profile, out string errorMessage))
         {
             await ShowMessageAsync($"Could not start {providerName} login", errorMessage);

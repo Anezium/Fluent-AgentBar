@@ -40,6 +40,16 @@ internal static class AppConfigStore
 
     internal static string DefaultClaudeProfileHome => "%USERPROFILE%\\.claude";
 
+    // Gemini CLI, Cursor and Grok Build keep a single local login each; the
+    // profile Home points at that tool's state directory.
+    internal static string DefaultGeminiHome => "%USERPROFILE%\\.gemini";
+
+    internal static string DefaultCursorHome => "%APPDATA%\\Cursor";
+
+    internal static string DefaultGrokHome => "%USERPROFILE%\\.grok";
+
+    internal static readonly IReadOnlyList<string> KnownProviders = ["codex", "claude", "gemini", "cursor", "grok"];
+
     private static AppConfigStorePaths DefaultPaths => new(
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ConfigFolderName),
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), LegacyConfigFolderName)
@@ -64,9 +74,41 @@ internal static class AppConfigStore
 
     internal static string NormalizeProvider(string? provider)
     {
-        return string.Equals(provider?.Trim(), "claude", StringComparison.OrdinalIgnoreCase)
-            ? "claude"
-            : "codex";
+        string trimmed = provider?.Trim() ?? string.Empty;
+        foreach (string known in KnownProviders)
+        {
+            if (string.Equals(trimmed, known, StringComparison.OrdinalIgnoreCase))
+            {
+                return known;
+            }
+        }
+
+        return "codex";
+    }
+
+    internal static string DisplayNameFor(string? provider)
+    {
+        return NormalizeProvider(provider) switch
+        {
+            "claude" => "Claude",
+            "gemini" => "Gemini",
+            "cursor" => "Cursor",
+            "grok" => "Grok",
+            _ => "Codex"
+        };
+    }
+
+    // Providers whose Home is an external tool state directory rather than an
+    // app-managed per-profile folder. Returns null for codex/claude.
+    internal static string? DefaultToolHomeFor(string? provider)
+    {
+        return NormalizeProvider(provider) switch
+        {
+            "gemini" => DefaultGeminiHome,
+            "cursor" => DefaultCursorHome,
+            "grok" => DefaultGrokHome,
+            _ => null
+        };
     }
 
     internal static bool IsProvider(ProfileConfig profile, string provider)
@@ -80,6 +122,11 @@ internal static class AppConfigStore
     private static string DefaultHomeForLabel(string provider, string label, bool firstClaude)
     {
         string normalizedProvider = NormalizeProvider(provider);
+        if (DefaultToolHomeFor(normalizedProvider) is string toolHome)
+        {
+            return toolHome;
+        }
+
         if (string.Equals(normalizedProvider, "claude", StringComparison.Ordinal) && firstClaude)
         {
             return DefaultClaudeProfileHome;
@@ -432,6 +479,11 @@ internal static class AppConfigStore
         AppConfigStorePaths paths)
     {
         string normalizedProvider = NormalizeProvider(provider);
+        if (DefaultToolHomeFor(normalizedProvider) is string toolHome)
+        {
+            return toolHome;
+        }
+
         if (string.Equals(normalizedProvider, "claude", StringComparison.Ordinal) && firstClaude)
         {
             return DefaultClaudeProfileHome;

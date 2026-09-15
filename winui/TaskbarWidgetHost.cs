@@ -204,7 +204,7 @@ internal sealed class TaskbarWidgetHost : IDisposable
         {
             ProfileConfig configuredProfile = config.Profiles.FirstOrDefault(profile => profile.Enabled)
                 ?? config.Profiles.First();
-            string providerName = AppConfigStore.IsProvider(configuredProfile, "claude") ? "Claude" : "Codex";
+            string providerName = AppConfigStore.DisplayNameFor(configuredProfile.Provider);
             entries.Add((providerName, MockUsageData.CreateUnavailableProfile(configuredProfile)));
         }
 

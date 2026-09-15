@@ -56,9 +56,7 @@ public sealed record ProviderUsage(
     public Visibility HistoryVisibility => HasHistory && IsHistoryExpanded ? Visibility.Visible : Visibility.Collapsed;
     public string HistoryChevronGlyph => IsHistoryExpanded ? "\uE70E" : "\uE70D";
 
-    private Color AccentColor => Name.Contains("claude", StringComparison.OrdinalIgnoreCase)
-        ? MockUsageData.ClaudeAccentColor
-        : MockUsageData.CodexAccentColor;
+    private Color AccentColor => MockUsageData.AccentColorFor(Name);
 
     public IReadOnlyList<HistoryBar> HistoryBars
     {
@@ -370,6 +368,22 @@ internal static class MockUsageData
 {
     internal static readonly Color CodexAccentColor = ParseHexColor("#60CDFF");
     internal static readonly Color ClaudeAccentColor = ParseHexColor("#E08A5E");
+    // Calm, desaturated brand-adjacent tints (see docs/design/fluent-windows.md).
+    internal static readonly Color GeminiAccentColor = ParseHexColor("#7FA8F8");
+    internal static readonly Color CursorAccentColor = ParseHexColor("#9AA3B2");
+    internal static readonly Color GrokAccentColor = ParseHexColor("#B4B4B4");
+
+    internal static Color AccentColorFor(string? providerName)
+    {
+        return AppConfigStore.NormalizeProvider(providerName) switch
+        {
+            "claude" => ClaudeAccentColor,
+            "gemini" => GeminiAccentColor,
+            "cursor" => CursorAccentColor,
+            "grok" => GrokAccentColor,
+            _ => CodexAccentColor
+        };
+    }
 
     public static ProfileUsage PrimaryProfile => CreatePrimaryProfile(AppConfigStore.Load());
 
@@ -390,7 +404,7 @@ internal static class MockUsageData
 
     public static ProfileUsage CreateUnavailableProfile(ProfileConfig profile)
     {
-        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, CodexAccentColor)
+        return new ProfileUsage(profile.Label, string.Empty, string.Empty, 0, 0, false, AccentColorFor(profile.Provider))
         {
             Provider = profile.Provider,
             Home = profile.Home,
