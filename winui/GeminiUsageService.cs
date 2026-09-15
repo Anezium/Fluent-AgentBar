@@ -390,7 +390,8 @@ internal sealed class GeminiUsageService : IDisposable
         // agy's background updater is detached from this hidden console and starts
         // its own child without CREATE_NO_WINDOW, which flashes a terminal window on
         // refreshes. Updates are left to the user instead (see UpdateRequiredMarkers).
-        startInfo.Environment[AntigravityDisableAutoUpdateEnvironmentVariable] = "1";
+        // agy only honours the literal "true"; "1" is silently ignored.
+        startInfo.Environment[AntigravityDisableAutoUpdateEnvironmentVariable] = "true";
 
         foreach (string argument in arguments)
         {

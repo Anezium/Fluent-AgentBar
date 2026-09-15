@@ -169,7 +169,7 @@ public sealed class GeminiUsageServiceTests
                 Assert.True(invocation.CreateNoWindow);
                 Assert.False(invocation.UseShellExecute);
                 Assert.True(invocation.RedirectStandardInput);
-                Assert.Equal("1", invocation.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"]);
+                Assert.Equal("true", invocation.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"]);
                 Assert.StartsWith(Path.GetTempPath(), invocation.WorkingDirectory, StringComparison.OrdinalIgnoreCase);
                 Assert.NotEqual(home, invocation.WorkingDirectory);
             }
