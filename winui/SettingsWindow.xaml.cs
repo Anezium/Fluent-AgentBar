@@ -438,9 +438,10 @@ public sealed partial class SettingsWindow : Window
             "gemini" => ($"{providerName} login started",
                 "A console window should open running the Gemini CLI; it asks you to sign in on first run. " +
                 "Refresh usage afterwards."),
-            "cursor" => ("Cursor dashboard opened",
-                "Cursor has no command-line login: sign in inside the Cursor app, then refresh usage. " +
-                "The dashboard just opened in your browser so you can check the account."),
+            "cursor" => ($"{providerName} login started",
+                "If the cursor-agent CLI is installed, a console window opened running \"cursor-agent login\"; " +
+                "otherwise the Cursor dashboard opened in your browser and you sign in inside the Cursor app. " +
+                "Refresh usage afterwards."),
             "grok" => ($"{providerName} login started",
                 "A console window should open running \"grok login\". Refresh usage afterwards."),
             _ => ($"{providerName} login started",

@@ -398,11 +398,64 @@ internal sealed class CursorUsageService : IDisposable
 
     // MARK: - Local session store
 
+    // Two local stores share the Cursor home: the desktop app's state.vscdb
+    // and the cursor-agent CLI's auth.json. Either token works as the web
+    // session cookie, so take whichever unexpired one lives longest.
     internal static CursorSession? LoadSessionFromDisk(string home)
     {
         string root = Environment.ExpandEnvironmentVariables(home);
         string databasePath = Path.Combine(root, "User", "globalStorage", "state.vscdb");
-        return LoadSessionFromDatabase(databasePath);
+        string authFilePath = Path.Combine(root, "auth.json");
+        return PickFreshestSession(
+            LoadSessionFromDatabase(databasePath),
+            LoadSessionFromAuthFile(authFilePath));
+    }
+
+    internal static CursorSession? PickFreshestSession(params CursorSession?[] candidates)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        List<CursorSession> sessions = candidates
+            .Where(session => session is not null && !string.IsNullOrWhiteSpace(session.AccessToken))
+            .Select(session => session!)
+            .ToList();
+
+        return sessions
+            .Where(session => session.ExpiresAt is null || session.ExpiresAt > now)
+            .OrderByDescending(session => session.ExpiresAt ?? DateTimeOffset.MaxValue)
+            .FirstOrDefault()
+            ?? sessions.OrderByDescending(session => session.ExpiresAt ?? DateTimeOffset.MinValue).FirstOrDefault();
+    }
+
+    // cursor-agent (the Cursor CLI) stores {"accessToken": "<jwt>", "refreshToken": "<jwt>"}
+    // at %APPDATA%\Cursor\auth.json on Windows.
+    internal static CursorSession? LoadSessionFromAuthFile(string authFilePath)
+    {
+        if (!File.Exists(authFilePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(authFilePath));
+            string? accessToken = ReadString(document.RootElement, "accessToken");
+            if (string.IsNullOrWhiteSpace(accessToken) || !TryReadUserId(accessToken, out string userId))
+            {
+                return null;
+            }
+
+            return new CursorSession(
+                accessToken,
+                userId,
+                ReadJwtClaim(accessToken, "email"),
+                null,
+                ReadJwtExpiry(accessToken));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Debug.WriteLine($"Cursor auth.json read failed: {ex.GetType().Name}");
+            return null;
+        }
     }
 
     // The database is locked while Cursor runs, so read a private copy of it

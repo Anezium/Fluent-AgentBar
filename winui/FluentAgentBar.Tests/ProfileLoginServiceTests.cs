@@ -48,6 +48,21 @@ public sealed class ProfileLoginServiceTests
     }
 
     [Fact]
+    public void CreateCursorLoginStartInfo_RunsCursorAgentLoginInAVisibleConsole()
+    {
+        string missingHome = Path.Combine(Path.GetTempPath(), "FluentAgentBar.Tests", "cursor-login-missing");
+
+        System.Diagnostics.ProcessStartInfo startInfo =
+            ProfileLoginService.CreateCursorLoginStartInfo(missingHome);
+
+        Assert.False(startInfo.CreateNoWindow);
+        Assert.Contains("/K", startInfo.ArgumentList);
+        Assert.Contains("cursor-agent login", startInfo.ArgumentList);
+        // The CLI owns the home directory; never create it on the CLI's behalf.
+        Assert.Equal(string.Empty, startInfo.WorkingDirectory);
+    }
+
+    [Fact]
     public void ResolveOnPath_FindsACommandThroughPathAndPathExt()
     {
         string directory = Path.Combine(

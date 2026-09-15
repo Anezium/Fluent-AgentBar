@@ -469,6 +469,77 @@ public sealed class CursorUsageServiceTests
     }
 
     [Fact]
+    public void LoadSessionFromAuthFile_ReadsTheCursorAgentCliToken()
+    {
+        string directory = CreateTempDirectory();
+        try
+        {
+            string token = Jwt("google-oauth2|123456", "cli@example.test", Now.AddDays(45));
+            string authFilePath = Path.Combine(directory, "auth.json");
+            File.WriteAllText(authFilePath, $"{{\"accessToken\":\"{token}\",\"refreshToken\":\"{token}\"}}");
+
+            CursorSession session = NotNull(CursorUsageService.LoadSessionFromAuthFile(authFilePath));
+
+            Assert.Equal(token, session.AccessToken);
+            Assert.Equal("123456", session.UserId);
+            Assert.Equal("cli@example.test", session.Email);
+            Assert.Null(session.MembershipType);
+            Assert.NotNull(session.ExpiresAt);
+
+            Assert.Null(CursorUsageService.LoadSessionFromAuthFile(Path.Combine(directory, "missing.json")));
+            File.WriteAllText(authFilePath, "{\"accessToken\":\"not-a-jwt\"}");
+            Assert.Null(CursorUsageService.LoadSessionFromAuthFile(authFilePath));
+            File.WriteAllText(authFilePath, "not json");
+            Assert.Null(CursorUsageService.LoadSessionFromAuthFile(authFilePath));
+        }
+        finally
+        {
+            TryDeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public void PickFreshestSession_PrefersTheUnexpiredTokenThatLivesLongest()
+    {
+        CursorSession expiredDesktop = new(Jwt("auth0|user_01ABC", null, Now.AddDays(-30)), "user_01ABC", null, "free_trial", Now.AddDays(-30));
+        CursorSession cli = new(Jwt("google-oauth2|1", null, Now.AddDays(45)), "1", null, null, Now.AddDays(45));
+        CursorSession desktop = new(Jwt("auth0|user_02", null, Now.AddDays(10)), "user_02", null, "pro", Now.AddDays(10));
+
+        Assert.Same(cli, CursorUsageService.PickFreshestSession(expiredDesktop, cli));
+        Assert.Same(cli, CursorUsageService.PickFreshestSession(desktop, cli));
+        Assert.Same(desktop, CursorUsageService.PickFreshestSession(null, desktop));
+        // Only expired candidates: still return one so the caller reports "expired" rather than "missing".
+        Assert.Same(expiredDesktop, CursorUsageService.PickFreshestSession(expiredDesktop, null));
+        Assert.Null(CursorUsageService.PickFreshestSession(null, null));
+    }
+
+    [Fact]
+    public void LoadSessionFromDisk_FallsBackToTheCliTokenWhenTheDesktopTokenIsExpired()
+    {
+        string home = CreateTempDirectory();
+        try
+        {
+            string globalStorage = Path.Combine(home, "User", "globalStorage");
+            Directory.CreateDirectory(globalStorage);
+            WriteItemTable(Path.Combine(globalStorage, "state.vscdb"), new Dictionary<string, object>
+            {
+                ["cursorAuth/accessToken"] = Jwt("auth0|user_01ABC", null, Now.AddDays(-1))
+            });
+            string cliToken = Jwt("google-oauth2|777", "cli@example.test", Now.AddDays(45));
+            File.WriteAllText(Path.Combine(home, "auth.json"), $"{{\"accessToken\":\"{cliToken}\"}}");
+
+            CursorSession session = NotNull(CursorUsageService.LoadSessionFromDisk(home));
+
+            Assert.Equal(cliToken, session.AccessToken);
+            Assert.Equal("777", session.UserId);
+        }
+        finally
+        {
+            TryDeleteDirectory(home);
+        }
+    }
+
+    [Fact]
     public void LoadSessionFromDatabase_ReturnsNullWhenTheTokenIsMissingOrNotAJwt()
     {
         string directory = CreateTempDirectory();

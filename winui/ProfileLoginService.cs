@@ -4,9 +4,13 @@ namespace FluentAgentBar;
 
 internal static class ProfileLoginService
 {
-    // Cursor has no CLI login: usage is read from the session the desktop app
-    // stores, so the best we can do is open the account page.
+    // Cursor usage is read from the session stored by the cursor-agent CLI
+    // (%APPDATA%\Cursor\auth.json) or the desktop app. When the CLI is
+    // installed, "cursor-agent login" refreshes that session; otherwise the
+    // best we can do is open the account page.
     internal const string CursorDashboardUrl = "https://cursor.com/dashboard";
+
+    internal const string CursorCliCommand = "cursor-agent";
 
     internal const string GrokCliDocsUrl = "https://x.ai/cli";
 
@@ -21,9 +25,10 @@ internal static class ProfileLoginService
             string provider = AppConfigStore.NormalizeProvider(profile.Provider);
             if (string.Equals(provider, "cursor", StringComparison.Ordinal))
             {
-                return TryStart(
-                    new ProcessStartInfo { FileName = CursorDashboardUrl, UseShellExecute = true },
-                    out errorMessage);
+                ProcessStartInfo cursorStartInfo = IsOnPath(CursorCliCommand)
+                    ? CreateCursorLoginStartInfo(Environment.ExpandEnvironmentVariables(profile.Home))
+                    : new ProcessStartInfo { FileName = CursorDashboardUrl, UseShellExecute = true };
+                return TryStart(cursorStartInfo, out errorMessage);
             }
 
             if (string.Equals(provider, "gemini", StringComparison.Ordinal) && !IsOnPath("gemini"))
@@ -116,6 +121,20 @@ internal static class ProfileLoginService
         startInfo.ArgumentList.Add("/K");
         startInfo.ArgumentList.Add("gemini");
         startInfo.WorkingDirectory = geminiHome;
+        return startInfo;
+    }
+
+    internal static ProcessStartInfo CreateCursorLoginStartInfo(string cursorHome)
+    {
+        ProcessStartInfo startInfo = CreateCmdStartInfo(createNoWindow: false);
+        startInfo.ArgumentList.Add("/D");
+        startInfo.ArgumentList.Add("/K");
+        startInfo.ArgumentList.Add(CursorCliCommand + " login");
+        if (Directory.Exists(cursorHome))
+        {
+            startInfo.WorkingDirectory = cursorHome;
+        }
+
         return startInfo;
     }
 
