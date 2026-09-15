@@ -53,8 +53,10 @@ public sealed partial class FlyoutWindow : Window
         _usageService = usageService;
         if (Environment.GetCommandLineArgs().Any(arg => arg.Equals("--expand-history", StringComparison.OrdinalIgnoreCase)))
         {
-            _expandedHistories.Add("Codex");
-            _expandedHistories.Add("Claude");
+            foreach (string provider in AppConfigStore.KnownProviders)
+            {
+                _expandedHistories.Add(AppConfigStore.DisplayNameFor(provider));
+            }
         }
 
         InitializeComponent();

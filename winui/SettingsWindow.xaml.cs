@@ -19,6 +19,11 @@ public sealed partial class SettingsWindow : Window
     private const double ContentSideMargin = 40;
     private const double MinimumContentWidth = 520;
 
+    // Provider tiles in the "New profile" dialog wrap after this many per row;
+    // 3 x 96 + 2 x 8 spacing fits the 320px dialog content width.
+    private const int ProviderTilesPerRow = 3;
+    private const double ProviderTileMinWidth = 96;
+
     private static SettingsWindow? _instance;
 
     private readonly IntPtr _hwnd;
@@ -190,7 +195,7 @@ public sealed partial class SettingsWindow : Window
         {
             await ShowMessageAsync(
                 "Profile exists",
-                $"A {newProfile.provider} profile named \"{newProfile.label}\" already exists.");
+                $"A {AppConfigStore.DisplayNameFor(newProfile.provider)} profile named \"{newProfile.label}\" already exists.");
             return;
         }
 
@@ -217,30 +222,82 @@ public sealed partial class SettingsWindow : Window
 
     private async Task<(string provider, string label)?> PromptForNewProfileAsync()
     {
-        ToggleButton codexTile = CreateProviderTile("Codex");
-        ToggleButton claudeTile = CreateProviderTile("Claude");
-        codexTile.IsChecked = true;
+        AppConfig config = AppConfigStore.Load();
+        Dictionary<string, ToggleButton> tilesByProvider = new(StringComparer.Ordinal);
+        string selectedProvider = "codex";
+
+        TextBlock toolHomeHint = new()
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            Visibility = Visibility.Collapsed
+        };
+
+        void UpdateToolHomeHint()
+        {
+            if (AppConfigStore.DefaultToolHomeFor(selectedProvider) is string toolHome)
+            {
+                toolHomeHint.Text =
+                    $"{AppConfigStore.DisplayNameFor(selectedProvider)} reads its own tool folder " +
+                    $"({AppConfigStore.ProfilePathLabel(toolHome)}); the name is only a label in this list.";
+                toolHomeHint.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                toolHomeHint.Visibility = Visibility.Collapsed;
+            }
+        }
 
         // Radio-style behavior: exactly one tile stays selected.
-        codexTile.Click += (_, _) =>
-        {
-            codexTile.IsChecked = true;
-            claudeTile.IsChecked = false;
-        };
-        claudeTile.Click += (_, _) =>
-        {
-            claudeTile.IsChecked = true;
-            codexTile.IsChecked = false;
-        };
-
         StackPanel tiles = new()
         {
-            Orientation = Orientation.Horizontal,
+            Orientation = Orientation.Vertical,
             HorizontalAlignment = HorizontalAlignment.Center,
             Spacing = 8
         };
-        tiles.Children.Add(codexTile);
-        tiles.Children.Add(claudeTile);
+        StackPanel? tileRow = null;
+        for (int index = 0; index < AppConfigStore.KnownProviders.Count; index++)
+        {
+            if (index % ProviderTilesPerRow == 0)
+            {
+                tileRow = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Spacing = 8
+                };
+                tiles.Children.Add(tileRow);
+            }
+
+            string provider = AppConfigStore.KnownProviders[index];
+            ToggleButton tile = CreateProviderTile(AppConfigStore.DisplayNameFor(provider));
+            tile.IsChecked = string.Equals(provider, selectedProvider, StringComparison.Ordinal);
+
+            // Providers backed by an external tool folder hold a single login,
+            // so a second profile would only duplicate the same numbers.
+            if (AppConfigStore.DefaultToolHomeFor(provider) is not null &&
+                config.Profiles.Any(existing => AppConfigStore.IsProvider(existing, provider)))
+            {
+                tile.IsEnabled = false;
+                ToolTipService.SetToolTip(
+                    tile,
+                    $"{AppConfigStore.DisplayNameFor(provider)} already has a profile; it reads a single tool folder.");
+            }
+
+            tile.Click += (_, _) =>
+            {
+                selectedProvider = provider;
+                foreach ((string key, ToggleButton other) in tilesByProvider)
+                {
+                    other.IsChecked = string.Equals(key, selectedProvider, StringComparison.Ordinal);
+                }
+
+                UpdateToolHomeHint();
+            };
+            tilesByProvider[provider] = tile;
+            tileRow!.Children.Add(tile);
+        }
 
         TextBox nameBox = new()
         {
@@ -248,9 +305,11 @@ public sealed partial class SettingsWindow : Window
             MinWidth = 280
         };
 
-        StackPanel content = new() { Spacing = 16, MinWidth = 296 };
+        StackPanel content = new() { Spacing = 16, MinWidth = 320 };
         content.Children.Add(tiles);
         content.Children.Add(nameBox);
+        content.Children.Add(toolHomeHint);
+        UpdateToolHomeHint();
 
         ContentDialog dialog = new()
         {
@@ -275,8 +334,7 @@ public sealed partial class SettingsWindow : Window
             return null;
         }
 
-        string provider = claudeTile.IsChecked == true ? "claude" : "codex";
-        return (provider, nameBox.Text.Trim());
+        return (selectedProvider, nameBox.Text.Trim());
     }
 
     private ToggleButton CreateProviderTile(string providerName)
@@ -308,7 +366,7 @@ public sealed partial class SettingsWindow : Window
         return new ToggleButton
         {
             Content = tileContent,
-            MinWidth = 140,
+            MinWidth = ProviderTileMinWidth,
             Padding = new Thickness(12, 14, 12, 12)
         };
     }
@@ -373,10 +431,22 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        string message = AppConfigStore.IsProvider(profile, "claude")
-            ? $"A console window should open to sign in profile \"{profile.Label}\". Refresh usage afterwards."
-            : $"A browser window should open to sign in profile \"{profile.Label}\". Refresh usage afterwards.";
-        await ShowMessageAsync($"{providerName} login started", message);
+        (string title, string message) = AppConfigStore.NormalizeProvider(profile.Provider) switch
+        {
+            "claude" => ($"{providerName} login started",
+                $"A console window should open to sign in profile \"{profile.Label}\". Refresh usage afterwards."),
+            "gemini" => ($"{providerName} login started",
+                "A console window should open running the Gemini CLI; it asks you to sign in on first run. " +
+                "Refresh usage afterwards."),
+            "cursor" => ("Cursor dashboard opened",
+                "Cursor has no command-line login: sign in inside the Cursor app, then refresh usage. " +
+                "The dashboard just opened in your browser so you can check the account."),
+            "grok" => ($"{providerName} login started",
+                "A console window should open running \"grok login\". Refresh usage afterwards."),
+            _ => ($"{providerName} login started",
+                $"A browser window should open to sign in profile \"{profile.Label}\". Refresh usage afterwards.")
+        };
+        await ShowMessageAsync(title, message);
     }
 
     private async Task<string?> PromptForProfileNameAsync(string title, string initialText, string primaryButtonText)
