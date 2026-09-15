@@ -109,6 +109,7 @@ internal sealed class GeminiUsageService : IDisposable
     private readonly Func<GeminiOAuthClient?> _oauthClientResolver;
     private readonly Func<string?> _antigravityBinaryResolver;
     private readonly Func<ProcessStartInfo, CancellationToken, Task<GeminiProcessResult>> _processRunner;
+    private readonly Func<string?> _antigravityCredentialReader;
     private readonly ConcurrentDictionary<string, GeminiUsageState> _states = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _oauthClientSync = new();
     private GeminiOAuthClient? _cachedOAuthClient;
@@ -128,12 +129,37 @@ internal sealed class GeminiUsageService : IDisposable
         HttpClient httpClient,
         Func<GeminiOAuthClient?>? oauthClientResolver,
         Func<string?>? antigravityBinaryResolver,
-        Func<ProcessStartInfo, CancellationToken, Task<GeminiProcessResult>>? processRunner)
+        Func<ProcessStartInfo, CancellationToken, Task<GeminiProcessResult>>? processRunner,
+        Func<string?>? antigravityCredentialReader = null)
     {
         _httpClient = httpClient;
         _oauthClientResolver = oauthClientResolver ?? ResolveOAuthClient;
         _antigravityBinaryResolver = antigravityBinaryResolver ?? ResolveAntigravityBinary;
         _processRunner = processRunner ?? RunProcessAsync;
+        _antigravityCredentialReader = antigravityCredentialReader
+            ?? (() => WindowsCredentialStore.ReadGenericBlob(AntigravityCredentialTarget));
+    }
+
+    // The Antigravity CLI keeps {"token":{...},"auth_method":"...","id_token":"<jwt>"}
+    // in the Windows Credential Manager; the id_token names the signed-in account.
+    internal const string AntigravityCredentialTarget = "gemini:antigravity";
+
+    internal static string? ReadAntigravityAccountEmail(string? credentialJson)
+    {
+        if (string.IsNullOrWhiteSpace(credentialJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(credentialJson);
+            return ExtractClaims(ReadString(document.RootElement, "id_token")).Email;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public async Task<ProviderUsageSnapshot> FetchAsync(string home, CancellationToken cancellationToken)
@@ -276,11 +302,26 @@ internal sealed class GeminiUsageService : IDisposable
                 AntigravityUsageTimeout,
                 cancellationToken);
 
-            return ParseAntigravityUsageReport(report.StandardOutput);
+            ProviderUsageSnapshot snapshot = ParseAntigravityUsageReport(report.StandardOutput);
+            string? email = ReadAntigravityAccountEmailSafely();
+            return string.IsNullOrWhiteSpace(email) ? snapshot : snapshot with { Email = email };
         }
         finally
         {
             TryDeleteDirectory(workingDirectory);
+        }
+    }
+
+    private string? ReadAntigravityAccountEmailSafely()
+    {
+        try
+        {
+            return ReadAntigravityAccountEmail(_antigravityCredentialReader());
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Antigravity credential read failed: {ex.GetType().Name}");
+            return null;
         }
     }
 

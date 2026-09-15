@@ -104,6 +104,41 @@ public sealed class GeminiUsageServiceTests
     }
 
     [Fact]
+    public async Task FetchAsync_WithAntigravityReport_TakesTheAccountEmailFromTheStoredIdToken()
+    {
+        string home = CreateTempDirectory();
+        try
+        {
+            string idToken = MakeIdToken("""{"email":"agy@example.test","email_verified":true}""");
+            string credentialJson = $$"""{"token":{"access_token":"x","token_type":"Bearer"},"auth_method":"consumer","id_token":"{{idToken}}"}""";
+            using GeminiUsageService service = CreateService(
+                antigravityBinary: @"C:\agy\agy.exe",
+                processRunner: AntigravityRunner("1.2.3", 0, AntigravityUsageReport),
+                antigravityCredentialReader: () => credentialJson);
+
+            ProviderUsageSnapshot snapshot = await service.FetchAsync(home, CancellationToken.None);
+
+            Assert.Equal("agy@example.test", snapshot.Email);
+            Assert.Equal("Antigravity", snapshot.Plan);
+        }
+        finally
+        {
+            TryDeleteDirectory(home);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("""{"token":{}}""")]
+    [InlineData("""{"id_token":"garbage"}""")]
+    public void ReadAntigravityAccountEmail_IgnoresMissingOrMalformedCredentials(string? credentialJson)
+    {
+        Assert.Null(GeminiUsageService.ReadAntigravityAccountEmail(credentialJson));
+    }
+
+    [Fact]
     public async Task FetchAsync_WithAntigravityReport_RunsUsageFromATemporaryWorkingDirectory()
     {
         string home = CreateTempDirectory();
@@ -771,14 +806,17 @@ public sealed class GeminiUsageServiceTests
         string? antigravityBinary,
         HttpClient? httpClient = null,
         GeminiOAuthClient? oauthClient = null,
-        Func<ProcessStartInfo, CancellationToken, Task<GeminiProcessResult>>? processRunner = null)
+        Func<ProcessStartInfo, CancellationToken, Task<GeminiProcessResult>>? processRunner = null,
+        Func<string?>? antigravityCredentialReader = null)
     {
         return new GeminiUsageService(
             httpClient ?? CreateHttpClient(request =>
                 throw new InvalidOperationException($"Unexpected request {request.RequestUri}")),
             () => oauthClient,
             () => antigravityBinary,
-            processRunner ?? ((_, _) => throw new InvalidOperationException("Unexpected process launch")));
+            processRunner ?? ((_, _) => throw new InvalidOperationException("Unexpected process launch")),
+            // Never touch the real Credential Manager from tests.
+            antigravityCredentialReader ?? (() => null));
     }
 
     private static Func<ProcessStartInfo, CancellationToken, Task<GeminiProcessResult>> AntigravityRunner(
