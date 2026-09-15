@@ -388,7 +388,175 @@ internal sealed class ClaudeUsageService : IDisposable
             "plan_type",
             "subscriptionType",
             "subscription_type") ?? string.Empty;
-        return new ClaudeUsageSnapshot(remainingPercent, weeklyPercent, plan, primaryResetAt, weeklyResetAt);
+        return new ClaudeUsageSnapshot(
+            remainingPercent,
+            weeklyPercent,
+            plan,
+            primaryResetAt,
+            weeklyResetAt,
+            ParseScopedWeeklyLimits(root));
+    }
+
+    // The usage endpoint reports model-scoped weekly windows (for example the
+    // promotional "Fable" window) through the newer `limits` array. Older
+    // responses only carry the flat `seven_day_opus` / `seven_day_sonnet`
+    // objects, so both shapes are merged here with `limits` winning.
+    private static IReadOnlyList<ClaudeScopedWeeklyLimit> ParseScopedWeeklyLimits(JsonElement root)
+    {
+        List<ClaudeScopedWeeklyLimit> limits = [];
+        HashSet<string> seenSlugs = new(StringComparer.Ordinal);
+
+        if (TryGetProperty(root, "limits", out JsonElement entries) &&
+            entries.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement entry in entries.EnumerateArray())
+            {
+                if (TryParseScopedWeeklyLimit(entry, seenSlugs, out ClaudeScopedWeeklyLimit limit))
+                {
+                    limits.Add(limit);
+                }
+            }
+        }
+
+        AddLegacyScopedWeeklyLimit(root, "seven_day_opus", "sevenDayOpus", "Opus", limits, seenSlugs);
+        AddLegacyScopedWeeklyLimit(root, "seven_day_sonnet", "sevenDaySonnet", "Sonnet", limits, seenSlugs);
+        return limits;
+    }
+
+    private static bool TryParseScopedWeeklyLimit(
+        JsonElement entry,
+        HashSet<string> seenSlugs,
+        out ClaudeScopedWeeklyLimit limit)
+    {
+        limit = null!;
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!string.Equals(TryReadString(entry, "group"), "weekly", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(TryReadString(entry, "kind"), "weekly_scoped", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Live responses put the 0..100 utilization under `percent`; some
+        // payloads use `utilization` for the same value.
+        if (!TryReadDouble(entry, out double utilization, "utilization", "percent") ||
+            !double.IsFinite(utilization))
+        {
+            return false;
+        }
+
+        if (!TryGetProperty(entry, "scope", out JsonElement scope) ||
+            !TryGetProperty(scope, "model", out JsonElement model) ||
+            model.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        string modelName = (TryReadString(model, "display_name", "displayName") ?? string.Empty).Trim();
+        if (modelName.Length == 0)
+        {
+            return false;
+        }
+
+        string modelId = (TryReadString(model, "id") ?? string.Empty).Trim();
+        if (IsAllModelsScope(modelId, modelName))
+        {
+            return false;
+        }
+
+        // Dedupe on the model id when it is present, but also claim the display
+        // name slug so a legacy `seven_day_opus` window cannot add a second
+        // group for a model the `limits` array already covers.
+        string nameSlug = Slugify(modelName);
+        string identitySlug = modelId.Length > 0 ? Slugify(modelId) : nameSlug;
+        if (identitySlug.Length == 0 ||
+            seenSlugs.Contains(identitySlug) ||
+            seenSlugs.Contains(nameSlug))
+        {
+            return false;
+        }
+
+        seenSlugs.Add(identitySlug);
+        seenSlugs.Add(nameSlug);
+
+        limit = new ClaudeScopedWeeklyLimit(
+            modelName,
+            ClampPercent(100 - utilization),
+            TryReadResetAt(entry));
+        return true;
+    }
+
+    private static void AddLegacyScopedWeeklyLimit(
+        JsonElement root,
+        string propertyName,
+        string alternatePropertyName,
+        string modelName,
+        List<ClaudeScopedWeeklyLimit> limits,
+        HashSet<string> seenSlugs)
+    {
+        if (!TryGetProperty(root, propertyName, out JsonElement window) &&
+            !TryGetProperty(root, alternatePropertyName, out window))
+        {
+            return;
+        }
+
+        if (window.ValueKind != JsonValueKind.Object ||
+            !TryReadDouble(window, out double utilization, "utilization", "percent") ||
+            !double.IsFinite(utilization))
+        {
+            return;
+        }
+
+        string slug = Slugify(modelName);
+        if (slug.Length == 0 || !seenSlugs.Add(slug))
+        {
+            return;
+        }
+
+        limits.Add(new ClaudeScopedWeeklyLimit(
+            modelName,
+            ClampPercent(100 - utilization),
+            TryReadResetAt(window)));
+    }
+
+    private static bool IsAllModelsScope(string modelId, string modelName)
+    {
+        if (Slugify(modelName) == "all-models")
+        {
+            return true;
+        }
+
+        if (modelId.Length == 0)
+        {
+            return false;
+        }
+
+        string idSlug = Slugify(modelId);
+        return idSlug == "all-models" || idSlug.EndsWith("-all-models", StringComparison.Ordinal);
+    }
+
+    private static string Slugify(string value)
+    {
+        StringBuilder builder = new(value.Length);
+        bool lastWasDash = false;
+        foreach (char character in value.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                builder.Append(character);
+                lastWasDash = false;
+            }
+            else if (!lastWasDash)
+            {
+                builder.Append('-');
+                lastWasDash = true;
+            }
+        }
+
+        return builder.ToString().Trim('-');
     }
 
     private static DateTimeOffset? TryReadResetAt(JsonElement element)
@@ -672,8 +840,56 @@ internal sealed class ClaudeUsageService : IDisposable
             MockUsageData.ClaudeAccentColor)
         {
             PrimaryResetAt = usage.PrimaryResetAt,
-            WeeklyResetAt = usage.WeeklyResetAt
+            WeeklyResetAt = usage.WeeklyResetAt,
+            QuotaGroups = BuildQuotaGroups(usage)
         };
+    }
+
+    // The first group stays unnamed and carries [5h, Weekly] because the taskbar
+    // widget reads windows [0] and [1] of the first group. Model-scoped weekly
+    // windows follow, one group per model, so the flyout can list them.
+    private static IReadOnlyList<QuotaGroupUsage>? BuildQuotaGroups(ClaudeUsageSnapshot usage)
+    {
+        if (usage.ScopedWeeklyLimits is not { Count: > 0 } scopedLimits)
+        {
+            return null;
+        }
+
+        List<QuotaGroupUsage> groups =
+        [
+            new QuotaGroupUsage(
+                string.Empty,
+                [
+                    new QuotaWindowUsage(
+                        "5h",
+                        usage.RemainingPercent,
+                        true,
+                        usage.PrimaryResetAt,
+                        MockUsageData.ClaudeAccentColor),
+                    new QuotaWindowUsage(
+                        "Weekly",
+                        usage.WeeklyPercent,
+                        true,
+                        usage.WeeklyResetAt,
+                        MockUsageData.ClaudeAccentColor)
+                ])
+        ];
+
+        foreach (ClaudeScopedWeeklyLimit limit in scopedLimits)
+        {
+            groups.Add(new QuotaGroupUsage(
+                limit.ModelName,
+                [
+                    new QuotaWindowUsage(
+                        "Weekly",
+                        limit.RemainingPercent,
+                        true,
+                        limit.ResetAt,
+                        MockUsageData.ClaudeAccentColor)
+                ]));
+        }
+
+        return groups;
     }
 
     // The account email lives in .claude.json (oauthAccount.emailAddress),
@@ -1297,7 +1513,14 @@ internal sealed class ClaudeUsageService : IDisposable
         int WeeklyPercent,
         string Plan,
         DateTimeOffset? PrimaryResetAt = null,
-        DateTimeOffset? WeeklyResetAt = null);
+        DateTimeOffset? WeeklyResetAt = null,
+        IReadOnlyList<ClaudeScopedWeeklyLimit>? ScopedWeeklyLimits = null);
+
+    /// <summary>A weekly quota window that applies to a single model (for example "Fable").</summary>
+    private sealed record ClaudeScopedWeeklyLimit(
+        string ModelName,
+        int RemainingPercent,
+        DateTimeOffset? ResetAt);
 
     private sealed class ClaudeUsageState
     {

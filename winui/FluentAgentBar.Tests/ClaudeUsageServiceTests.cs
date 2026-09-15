@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -390,6 +391,168 @@ public sealed class ClaudeUsageServiceTests
             Assert.True(usage.IsAvailable);
             Assert.Equal(expectedRemainingPercent, usage.RemainingPercent);
             Assert.Equal(expectedRemainingPercent, usage.WeeklyPercent);
+        }
+        finally
+        {
+            TryDeleteDirectory(configDir);
+        }
+    }
+
+    [Fact]
+    public async Task FetchAsync_WhenScopedWeeklyLimitIsPresent_AddsModelQuotaGroup()
+    {
+        ProfileUsage usage = await FetchUsageAsync("""
+        {
+          "five_hour": { "utilization": 22.0, "resets_at": "2026-09-15T13:10:00.942676+00:00" },
+          "seven_day": { "utilization": 23.0, "resets_at": "2026-09-19T15:00:00.942701+00:00" },
+          "seven_day_opus": null,
+          "seven_day_sonnet": null,
+          "limits": [
+            {
+              "kind": "session", "group": "session", "percent": 22,
+              "resets_at": "2026-09-15T13:10:00.942676+00:00", "scope": null, "is_active": false
+            },
+            {
+              "kind": "weekly_all", "group": "weekly", "percent": 23,
+              "resets_at": "2026-09-19T15:00:00.942701+00:00", "scope": null, "is_active": false
+            },
+            {
+              "kind": "weekly_scoped", "group": "weekly", "percent": 43,
+              "resets_at": "2026-09-19T15:00:00.942986+00:00",
+              "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null },
+              "is_active": true
+            }
+          ]
+        }
+        """);
+
+        Assert.True(usage.IsAvailable);
+        Assert.Equal(78, usage.RemainingPercent);
+        Assert.Equal(77, usage.WeeklyPercent);
+
+        IReadOnlyList<QuotaGroupUsage> groups = usage.DisplayQuotaGroups;
+        Assert.Equal(2, groups.Count);
+
+        Assert.Equal(string.Empty, groups[0].Name);
+        Assert.Equal(["5h", "Weekly"], groups[0].Windows.Select(window => window.Label));
+        Assert.Equal(78, groups[0].Windows[0].RemainingPercent);
+        Assert.Equal(77, groups[0].Windows[1].RemainingPercent);
+
+        QuotaGroupUsage fable = groups[1];
+        Assert.Equal("Fable", fable.Name);
+        QuotaWindowUsage fableWindow = Assert.Single(fable.Windows);
+        Assert.Equal("Weekly", fableWindow.Label);
+        Assert.Equal(57, fableWindow.RemainingPercent);
+        Assert.True(fableWindow.IsAvailable);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-09-19T15:00:00.942986+00:00", CultureInfo.InvariantCulture),
+            fableWindow.ResetAt);
+        Assert.Equal(MockUsageData.ClaudeAccentColor, fableWindow.AccentColor);
+    }
+
+    [Fact]
+    public async Task FetchAsync_WhenScopedWeeklyLimitTargetsAllModels_AddsNoExtraGroup()
+    {
+        ProfileUsage usage = await FetchUsageAsync("""
+        {
+          "five_hour": { "utilization": 10 },
+          "seven_day": { "utilization": 20 },
+          "limits": [
+            {
+              "kind": "weekly_scoped", "group": "weekly", "percent": 20,
+              "resets_at": "2026-09-19T15:00:00+00:00",
+              "scope": { "model": { "id": "claude-all-models", "display_name": "All models" } },
+              "is_active": false
+            }
+          ]
+        }
+        """);
+
+        QuotaGroupUsage group = Assert.Single(usage.DisplayQuotaGroups);
+        Assert.Equal(string.Empty, group.Name);
+    }
+
+    [Fact]
+    public async Task FetchAsync_WhenScopedWeeklyLimitsRepeatAModel_KeepsASingleGroup()
+    {
+        ProfileUsage usage = await FetchUsageAsync("""
+        {
+          "five_hour": { "utilization": 10 },
+          "seven_day": { "utilization": 20 },
+          "seven_day_opus": { "utilization": 90, "resets_at": "2026-09-19T15:00:00+00:00" },
+          "limits": [
+            {
+              "kind": "WEEKLY_SCOPED", "group": "Weekly", "percent": 12,
+              "resets_at": "2026-09-19T15:00:00+00:00",
+              "scope": { "model": { "id": "claude-opus-4", "display_name": "Opus" } }
+            },
+            {
+              "kind": "weekly_scoped", "group": "weekly", "percent": 44,
+              "resets_at": "2026-09-19T15:00:00+00:00",
+              "scope": { "model": { "id": "claude-opus-4", "display_name": "Opus" } }
+            },
+            {
+              "kind": "weekly_scoped", "group": "weekly",
+              "resets_at": "2026-09-19T15:00:00+00:00",
+              "scope": { "model": { "id": "claude-fable", "display_name": "Fable" } }
+            }
+          ]
+        }
+        """);
+
+        IReadOnlyList<QuotaGroupUsage> groups = usage.DisplayQuotaGroups;
+        Assert.Equal(["", "Opus"], groups.Select(group => group.Name));
+        Assert.Equal(88, groups[1].Windows[0].RemainingPercent);
+    }
+
+    [Fact]
+    public async Task FetchAsync_WhenLegacySevenDayModelWindowsArePresent_AddsModelQuotaGroups()
+    {
+        ProfileUsage usage = await FetchUsageAsync("""
+        {
+          "five_hour": { "utilization": 11 },
+          "seven_day": { "utilization": 9 },
+          "seven_day_opus": { "utilization": 35, "resets_at": "2026-09-19T15:00:00+00:00" },
+          "seven_day_sonnet": { "utilization": 5 }
+        }
+        """);
+
+        IReadOnlyList<QuotaGroupUsage> groups = usage.DisplayQuotaGroups;
+        Assert.Equal(["", "Opus", "Sonnet"], groups.Select(group => group.Name));
+        Assert.Equal(65, groups[1].Windows[0].RemainingPercent);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-09-19T15:00:00+00:00", CultureInfo.InvariantCulture),
+            groups[1].Windows[0].ResetAt);
+        Assert.Equal(95, groups[2].Windows[0].RemainingPercent);
+        Assert.Null(groups[2].Windows[0].ResetAt);
+    }
+
+    [Fact]
+    public async Task FetchAsync_WithoutScopedWeeklyLimits_KeepsASingleQuotaGroup()
+    {
+        ProfileUsage usage = await FetchUsageAsync("""
+        {
+          "five_hour": { "utilization": 11, "resets_at": "2026-09-15T13:10:00+00:00" },
+          "seven_day": { "utilization": 9, "resets_at": "2026-09-19T15:00:00+00:00" }
+        }
+        """);
+
+        QuotaGroupUsage group = Assert.Single(usage.DisplayQuotaGroups);
+        Assert.Equal(string.Empty, group.Name);
+        Assert.Equal(["5h", "Weekly"], group.Windows.Select(window => window.Label));
+        Assert.Equal(89, group.Windows[0].RemainingPercent);
+        Assert.Equal(91, group.Windows[1].RemainingPercent);
+    }
+
+    private static async Task<ProfileUsage> FetchUsageAsync(string responseJson)
+    {
+        string configDir = CreateTempDirectory();
+        try
+        {
+            using ClaudeUsageService service = new(
+                CreateHttpClient(_ => Task.FromResult(JsonResponse(responseJson))),
+                () => "env-access");
+            return await service.FetchAsync(configDir, CancellationToken.None);
         }
         finally
         {
