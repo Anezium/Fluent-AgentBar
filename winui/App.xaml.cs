@@ -35,6 +35,7 @@ public partial class App : Application
         }
 
         _singleInstanceService = startup.Service;
+        WindowsStartupService.TrySyncRegisteredExecutable();
         _usageService = new UsageService();
 
         ReconcileTaskbarWidgets();
