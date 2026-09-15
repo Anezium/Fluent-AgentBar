@@ -232,6 +232,8 @@ public sealed record ProfileUsage(
     public string PrimaryQuotaLabel { get; init; } = "5h";
     public string WeeklyQuotaLabel { get; init; } = "Weekly";
     public IReadOnlyList<QuotaGroupUsage>? QuotaGroups { get; init; }
+    // Provider-specific fix shown instead of the generic unavailable text, e.g. "Run 'agy update'".
+    public string StatusHint { get; init; } = string.Empty;
 
     public string RemainingText => IsAvailable && HasPrimaryQuota
         ? $"{Math.Clamp(RemainingPercent, 0, 100)}%"
@@ -241,9 +243,11 @@ public sealed record ProfileUsage(
         : "--";
     public string UsageStatusText => IsAvailable
         ? string.Empty
-        : Plan.Contains("Login Required", StringComparison.OrdinalIgnoreCase)
-            ? "Sign in again from Settings to restore usage."
-            : "Usage unavailable. Refresh, then sign in again if it persists.";
+        : StatusHint.Length > 0
+            ? StatusHint
+            : Plan.Contains("Login Required", StringComparison.OrdinalIgnoreCase)
+                ? "Sign in again from Settings to restore usage."
+                : "Usage unavailable. Refresh, then sign in again if it persists.";
     public Visibility UsageStatusVisibility => IsAvailable
         ? Visibility.Collapsed
         : Visibility.Visible;

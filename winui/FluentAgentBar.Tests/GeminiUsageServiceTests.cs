@@ -169,6 +169,7 @@ public sealed class GeminiUsageServiceTests
                 Assert.True(invocation.CreateNoWindow);
                 Assert.False(invocation.UseShellExecute);
                 Assert.True(invocation.RedirectStandardInput);
+                Assert.Equal("1", invocation.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"]);
                 Assert.StartsWith(Path.GetTempPath(), invocation.WorkingDirectory, StringComparison.OrdinalIgnoreCase);
                 Assert.NotEqual(home, invocation.WorkingDirectory);
             }
@@ -180,7 +181,7 @@ public sealed class GeminiUsageServiceTests
     }
 
     [Fact]
-    public async Task FetchAsync_WhenAntigravityVersionIsTooOld_Fails()
+    public async Task FetchAsync_WhenAntigravityVersionIsTooOld_RequiresUpdate()
     {
         string home = CreateTempDirectory();
         try
@@ -189,10 +190,83 @@ public sealed class GeminiUsageServiceTests
                 antigravityBinary: @"C:\agy\agy.exe",
                 processRunner: AntigravityRunner("1.1.10", 0, AntigravityUsageReport));
 
-            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            ProviderUpdateRequiredException exception = await Assert.ThrowsAsync<ProviderUpdateRequiredException>(
                 () => service.FetchAsync(home, CancellationToken.None));
 
             Assert.Contains("1.1.11", exception.Message);
+            Assert.Contains("agy update", exception.Message);
+        }
+        finally
+        {
+            TryDeleteDirectory(home);
+        }
+    }
+
+    [Fact]
+    public async Task FetchAsync_WhenAntigravityExitsAskingForAnUpdate_RequiresUpdate()
+    {
+        string home = CreateTempDirectory();
+        try
+        {
+            using GeminiUsageService service = CreateService(
+                antigravityBinary: @"C:\agy\agy.exe",
+                processRunner: (startInfo, _) => Task.FromResult(startInfo.ArgumentList.Contains("--version")
+                    ? new GeminiProcessResult(0, "1.2.3\n")
+                    : new GeminiProcessResult(1, string.Empty, "This version is no longer served. Please update agy.")));
+
+            ProviderUpdateRequiredException exception = await Assert.ThrowsAsync<ProviderUpdateRequiredException>(
+                () => service.FetchAsync(home, CancellationToken.None));
+
+            Assert.Contains("agy update", exception.Message);
+        }
+        finally
+        {
+            TryDeleteDirectory(home);
+        }
+    }
+
+    [Fact]
+    public async Task FetchAsync_WhenAntigravityIsOutdatedAndTheGeminiFallbackFails_RequiresUpdate()
+    {
+        string home = CreateTempDirectory();
+        try
+        {
+            WriteCredentials(home, accessToken: "live-access", expiresAt: DateTimeOffset.UtcNow.AddHours(1));
+
+            using GeminiUsageService service = CreateService(
+                antigravityBinary: @"C:\agy\agy.exe",
+                processRunner: AntigravityRunner("1.1.10", 0, AntigravityUsageReport));
+
+            await Assert.ThrowsAsync<ProviderUpdateRequiredException>(
+                () => service.FetchAsync(home, CancellationToken.None));
+        }
+        finally
+        {
+            TryDeleteDirectory(home);
+        }
+    }
+
+    [Fact]
+    public async Task FetchAsync_WhenUpdateIsRequired_RetriesOnTheNextRefreshInsteadOfBackingOff()
+    {
+        string home = CreateTempDirectory();
+        try
+        {
+            int versionRuns = 0;
+            using GeminiUsageService service = CreateService(
+                antigravityBinary: @"C:\agy\agy.exe",
+                processRunner: (_, _) =>
+                {
+                    versionRuns++;
+                    return Task.FromResult(new GeminiProcessResult(0, "1.1.10\n"));
+                });
+
+            await Assert.ThrowsAsync<ProviderUpdateRequiredException>(
+                () => service.FetchAsync(home, CancellationToken.None));
+            await Assert.ThrowsAsync<ProviderUpdateRequiredException>(
+                () => service.FetchAsync(home, CancellationToken.None));
+
+            Assert.Equal(2, versionRuns);
         }
         finally
         {
@@ -213,12 +287,29 @@ public sealed class GeminiUsageServiceTests
     [InlineData("1.1.10")]
     [InlineData("1.0.99")]
     [InlineData("0.9.0")]
+    public void EnsureSupportedAntigravityVersion_AsksToUpdateOlderVersions(string version)
+    {
+        Assert.Throws<ProviderUpdateRequiredException>(() => GeminiUsageService.EnsureSupportedAntigravityVersion(version));
+    }
+
+    [Theory]
     [InlineData("1.2")]
     [InlineData("1.2.3-beta")]
     [InlineData("")]
-    public void EnsureSupportedAntigravityVersion_RejectsUnsupportedVersions(string version)
+    public void EnsureSupportedAntigravityVersion_RejectsUnreadableVersions(string version)
     {
         Assert.Throws<InvalidOperationException>(() => GeminiUsageService.EnsureSupportedAntigravityVersion(version));
+    }
+
+    [Fact]
+    public void ParseAntigravityUsageReport_WhenCliIsOutdated_RequiresUpdate()
+    {
+        const string report = """
+        { "status": "ERROR", "error": "This version of the CLI is out of date. Run agy update to continue." }
+        """;
+
+        Assert.Throws<ProviderUpdateRequiredException>(
+            () => GeminiUsageService.ParseAntigravityUsageReport(report));
     }
 
     [Fact]

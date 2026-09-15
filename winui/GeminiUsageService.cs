@@ -17,7 +17,7 @@ namespace FluentAgentBar;
 // hardcoded here on purpose: CodexBar does not hardcode them either.
 internal sealed record GeminiOAuthClient(string ClientId, string ClientSecret);
 
-internal sealed record GeminiProcessResult(int ExitCode, string StandardOutput);
+internal sealed record GeminiProcessResult(int ExitCode, string StandardOutput, string StandardError = "");
 
 // Gemini quota, from the two sources that still answer.
 //
@@ -41,6 +41,7 @@ internal sealed class GeminiUsageService : IDisposable
     private const string OAuth2FileName = "dist/src/code_assist/oauth2.js";
 
     private const string AntigravityBinaryEnvironmentVariable = "AGY_PATH";
+    private const string AntigravityDisableAutoUpdateEnvironmentVariable = "AGY_CLI_DISABLE_AUTO_UPDATE";
     private const string AntigravityPlan = "Antigravity";
     private const string GeminiModelsGroupName = "Gemini Models";
 
@@ -60,6 +61,9 @@ internal sealed class GeminiUsageService : IDisposable
 
     private const string NoUsableSourceMessage =
         "No Gemini usage source found. Sign in to Antigravity (run 'agy'), or sign in with the Gemini CLI.";
+
+    private const string AntigravityUpdateRequiredMessage =
+        "The Antigravity CLI is out of date. Run 'agy update', then refresh.";
 
     private static readonly TimeSpan MinimumFetchInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan InitialBackoff = TimeSpan.FromMinutes(5);
@@ -103,6 +107,21 @@ internal sealed class GeminiUsageService : IDisposable
         "unauthorized",
         "no credentials",
         "credentials expired"
+    ];
+
+    // Wording that means the installed agy is too old to be served. Auto-update is
+    // disabled for the runs made here, so the user has to update it by hand.
+    private static readonly string[] UpdateRequiredMarkers =
+    [
+        "agy update",
+        "please update",
+        "please upgrade",
+        "update required",
+        "upgrade required",
+        "out of date",
+        "outdated",
+        "unsupported version",
+        "minimum version"
     ];
 
     private readonly HttpClient _httpClient;
@@ -210,6 +229,12 @@ internal sealed class GeminiUsageService : IDisposable
                 state.IdToken = null;
                 throw;
             }
+            catch (ProviderUpdateRequiredException)
+            {
+                // Only the user can fix an outdated CLI; a stale snapshot or a backoff would hide that.
+                state.CachedSnapshot = null;
+                throw;
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine(ex);
@@ -244,6 +269,7 @@ internal sealed class GeminiUsageService : IDisposable
     {
         string? antigravityBinary = _antigravityBinaryResolver();
         bool hasGeminiCredentials = File.Exists(Path.Combine(home, CredentialsFileName));
+        ProviderUpdateRequiredException? outdatedAntigravity = null;
 
         if (!string.IsNullOrWhiteSpace(antigravityBinary))
         {
@@ -254,6 +280,10 @@ internal sealed class GeminiUsageService : IDisposable
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (ProviderUpdateRequiredException ex) when (hasGeminiCredentials)
+            {
+                outdatedAntigravity = ex;
             }
             catch (Exception ex) when (hasGeminiCredentials)
             {
@@ -266,9 +296,18 @@ internal sealed class GeminiUsageService : IDisposable
             throw new ProviderLoginRequiredException(NoUsableSourceMessage);
         }
 
-        EnsureSupportedAuthType(home);
-        GeminiCredentials credentials = LoadCredentials(home);
-        return await FetchGeminiOAuthSnapshotAsync(home, state, credentials, cancellationToken);
+        try
+        {
+            EnsureSupportedAuthType(home);
+            GeminiCredentials credentials = LoadCredentials(home);
+            return await FetchGeminiOAuthSnapshotAsync(home, state, credentials, cancellationToken);
+        }
+        catch (Exception ex) when (outdatedAntigravity is not null && !cancellationToken.IsCancellationRequested)
+        {
+            // The Gemini CLI path could not stand in, so the outdated agy is what the user can act on.
+            Debug.WriteLine(ex);
+            throw outdatedAntigravity;
+        }
     }
 
     // MARK: Antigravity CLI
@@ -301,6 +340,12 @@ internal sealed class GeminiUsageService : IDisposable
                 ["-p", "/usage", "--output-format", "json", "--print-timeout", "90s"],
                 AntigravityUsageTimeout,
                 cancellationToken);
+
+            if (report.ExitCode != 0 &&
+                IsUpdateRequiredMessage(report.StandardOutput + "\n" + report.StandardError))
+            {
+                throw new ProviderUpdateRequiredException(AntigravityUpdateRequiredMessage);
+            }
 
             ProviderUsageSnapshot snapshot = ParseAntigravityUsageReport(report.StandardOutput);
             string? email = ReadAntigravityAccountEmailSafely();
@@ -342,6 +387,11 @@ internal sealed class GeminiUsageService : IDisposable
             RedirectStandardError = true
         };
 
+        // agy's background updater is detached from this hidden console and starts
+        // its own child without CREATE_NO_WINDOW, which flashes a terminal window on
+        // refreshes. Updates are left to the user instead (see UpdateRequiredMarkers).
+        startInfo.Environment[AntigravityDisableAutoUpdateEnvironmentVariable] = "1";
+
         foreach (string argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
@@ -367,17 +417,20 @@ internal sealed class GeminiUsageService : IDisposable
     internal static void EnsureSupportedAntigravityVersion(string version)
     {
         Match match = AntigravityVersionPattern.Match(version.Trim());
-        if (match.Success &&
-            int.TryParse(match.Groups[1].Value, out int major) &&
-            int.TryParse(match.Groups[2].Value, out int minor) &&
-            int.TryParse(match.Groups[3].Value, out int patch) &&
-            new Version(major, minor, patch) >= MinimumAntigravityVersion)
+        if (!match.Success ||
+            !int.TryParse(match.Groups[1].Value, out int major) ||
+            !int.TryParse(match.Groups[2].Value, out int minor) ||
+            !int.TryParse(match.Groups[3].Value, out int patch))
         {
-            return;
+            throw new InvalidOperationException(
+                $"Antigravity usage reports require agy {MinimumAntigravityVersion} or later.");
         }
 
-        throw new InvalidOperationException(
-            $"Antigravity usage reports require agy {MinimumAntigravityVersion} or later.");
+        if (new Version(major, minor, patch) < MinimumAntigravityVersion)
+        {
+            throw new ProviderUpdateRequiredException(
+                $"Antigravity usage reports require agy {MinimumAntigravityVersion} or later. Run 'agy update', then refresh.");
+        }
     }
 
     internal static ProviderUsageSnapshot ParseAntigravityUsageReport(string json)
@@ -393,6 +446,11 @@ internal sealed class GeminiUsageService : IDisposable
             {
                 throw new ProviderLoginRequiredException(
                     "Antigravity is not signed in. Run 'agy' to sign in.");
+            }
+
+            if (IsUpdateRequiredMessage(error))
+            {
+                throw new ProviderUpdateRequiredException(AntigravityUpdateRequiredMessage);
             }
 
             throw new InvalidOperationException($"The Antigravity CLI usage report failed: {error}");
@@ -557,6 +615,12 @@ internal sealed class GeminiUsageService : IDisposable
         return LoginRequiredMarkers.Any(marker => normalized.Contains(marker, StringComparison.Ordinal));
     }
 
+    private static bool IsUpdateRequiredMessage(string message)
+    {
+        string normalized = message.ToLowerInvariant();
+        return UpdateRequiredMarkers.Any(marker => normalized.Contains(marker, StringComparison.Ordinal));
+    }
+
     internal static string? ResolveAntigravityBinary()
     {
         string? fromEnvironment = Trimmed(Environment.GetEnvironmentVariable(AntigravityBinaryEnvironmentVariable));
@@ -608,7 +672,13 @@ internal sealed class GeminiUsageService : IDisposable
                 output = output[..MaximumProcessOutputChars];
             }
 
-            return new GeminiProcessResult(process.ExitCode, output);
+            string error = standardError.Result;
+            if (error.Length > MaximumProcessOutputChars)
+            {
+                error = error[..MaximumProcessOutputChars];
+            }
+
+            return new GeminiProcessResult(process.ExitCode, output, error);
         }
         catch (OperationCanceledException)
         {

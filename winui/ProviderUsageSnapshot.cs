@@ -30,3 +30,13 @@ internal sealed class ProviderLoginRequiredException : Exception
     {
     }
 }
+
+// Thrown when the provider's CLI is too old to report usage and only the user
+// can update it; the profile is shown as "Update Required" with the message as
+// the hint, instead of a generic unavailable state.
+internal sealed class ProviderUpdateRequiredException : Exception
+{
+    public ProviderUpdateRequiredException(string message) : base(message)
+    {
+    }
+}

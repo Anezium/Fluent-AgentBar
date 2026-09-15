@@ -208,6 +208,11 @@ public sealed class UsageService : IDisposable
             ProviderDiagnostics.Record(profile.Provider, profile.Label, ex);
             return Unavailable(profile, accent, "Login Required");
         }
+        catch (ProviderUpdateRequiredException ex)
+        {
+            ProviderDiagnostics.Record(profile.Provider, profile.Label, ex);
+            return Unavailable(profile, accent, "Update Required") with { StatusHint = ex.Message };
+        }
 
         return MapExternalSnapshot(profile, snapshot, accent);
     }
