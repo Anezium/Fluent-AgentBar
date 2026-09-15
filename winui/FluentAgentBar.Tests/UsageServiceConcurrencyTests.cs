@@ -3,8 +3,28 @@ using Xunit;
 
 namespace FluentAgentBar.Tests;
 
-public sealed class UsageServiceConcurrencyTests
+[Collection("ProviderDiagnostics")]
+public sealed class UsageServiceConcurrencyTests : IDisposable
 {
+    private readonly string _logDirectory;
+    private readonly IDisposable _logScope;
+
+    public UsageServiceConcurrencyTests()
+    {
+        _logDirectory = Path.Combine(Path.GetTempPath(), "FluentAgentBar.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_logDirectory);
+        _logScope = ProviderDiagnostics.UseLogDirectory(_logDirectory);
+    }
+
+    public void Dispose()
+    {
+        _logScope.Dispose();
+        if (Directory.Exists(_logDirectory))
+        {
+            Directory.Delete(_logDirectory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task FetchProvidersAsync_FetchesProfilesConcurrentlyAndPreservesOrder()
     {

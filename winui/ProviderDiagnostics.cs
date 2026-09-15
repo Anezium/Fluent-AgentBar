@@ -12,7 +12,18 @@ internal static class ProviderDiagnostics
     private const long MaxLogBytes = 512 * 1024;
     private static readonly object Sync = new();
 
-    internal static string LogPath => Path.Combine(AppConfigStore.ConfigDirectory, "provider-errors.log");
+    // Tests redirect this so Record() never touches the real %APPDATA% log.
+    internal static string? LogDirectoryOverride { get; set; }
+
+    internal static string LogDirectory => LogDirectoryOverride ?? AppConfigStore.ConfigDirectory;
+
+    internal static string LogPath => Path.Combine(LogDirectory, "provider-errors.log");
+
+    internal static IDisposable UseLogDirectory(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        return new LogDirectoryScope(directory);
+    }
 
     internal static void Record(string provider, string profileLabel, Exception exception)
     {
@@ -25,13 +36,14 @@ internal static class ProviderDiagnostics
         {
             lock (Sync)
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-                if (File.Exists(LogPath) && new FileInfo(LogPath).Length > MaxLogBytes)
+                string logPath = LogPath;
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+                if (File.Exists(logPath) && new FileInfo(logPath).Length > MaxLogBytes)
                 {
-                    File.Delete(LogPath);
+                    File.Delete(logPath);
                 }
 
-                File.AppendAllText(LogPath, line + Environment.NewLine);
+                File.AppendAllText(logPath, line + Environment.NewLine);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -49,5 +61,35 @@ internal static class ProviderDiagnostics
         }
 
         return string.Join(" <- ", parts);
+    }
+
+    private sealed class LogDirectoryScope : IDisposable
+    {
+        private readonly string? _previous;
+        private bool _disposed;
+
+        public LogDirectoryScope(string directory)
+        {
+            lock (Sync)
+            {
+                _previous = LogDirectoryOverride;
+                LogDirectoryOverride = directory;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            lock (Sync)
+            {
+                LogDirectoryOverride = _previous;
+            }
+
+            _disposed = true;
+        }
     }
 }
