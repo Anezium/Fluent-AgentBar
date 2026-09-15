@@ -1,5 +1,10 @@
+using System.Windows.Media;
+
 namespace FluentAgentBar.WpfTaskbarWidget;
 
+// Brand marks sourced from https://svgl.app, all normalised to a 256x256
+// viewBox. Kept in sync with FluentAgentBar.ProviderIcons; this project is
+// standalone and cannot reference the WinUI assembly.
 internal static class ProviderPathData
 {
     internal const string Claude =
@@ -7,4 +12,78 @@ internal static class ProviderPathData
 
     internal const string OpenAi =
         "M239.184 106.203a64.716 64.716 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.716 64.716 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.665 64.665 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.767 64.767 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483Zm-97.56 136.338a48.397 48.397 0 0 1-31.105-11.255l1.535-.87 51.67-29.825a8.595 8.595 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601Zm-104.466-44.61a48.345 48.345 0 0 1-5.781-32.589l1.534.921 51.722 29.826a8.339 8.339 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803ZM23.549 85.38a48.499 48.499 0 0 1 25.58-21.333v61.39a8.288 8.288 0 0 0 4.195 7.316l62.874 36.272-21.845 12.636a.819.819 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405v.256Zm179.466 41.695-63.08-36.63L161.73 77.86a.819.819 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.544 8.544 0 0 0-4.4-7.213Zm21.742-32.69-1.535-.922-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.716.716 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391v.205ZM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87-51.67 29.825a8.595 8.595 0 0 0-4.246 7.367l-.051 72.697Zm11.868-25.58 28.138-16.217 28.188 16.218v32.434l-28.086 16.218-28.188-16.218-.052-32.434Z";
+
+    // Source viewBox 296x298, uniformly scaled by 256/298.
+    internal const string Gemini =
+        "M122.1592 4.1974 c1.9604 -5.3004 9.4857 -5.2154 11.3259 0.1271 l5.1415 14.9219 a158.0706 158.0706 0 0 0 95.5765 97.1159 l16.5833 6.0108 c5.2772 1.9131 5.2884 9.3723 0.0172 11.3009 l-16.6228 6.0839 a158.068 158.068 0 0 0 -94.0628 93.9683 l-6.5057 17.7216 c-1.9252 5.2446 -9.3371 5.2583 -11.282 0.0215 l-6.7934 -18.2946 a158.0671 158.0671 0 0 0 -93.6548 -93.3438 l-16.9218 -6.2187 c-5.242 -1.9269 -5.2557 -9.3354 -0.0215 -11.2812 l17.2525 -6.4146 A158.0654 158.0654 0 0 0 115.3641 22.5761 l6.7952 -18.3787 Z";
+
+    // Source viewBox 466.73x532.09, uniformly scaled by 256/532.09 and centred.
+    internal const string Cursor =
+        "M235.8025 60.5925 L133.3188 1.4241 c-3.2909 -1.9004 -7.3515 -1.9004 -10.6424 0 L20.1975 60.5925 c-2.7664 1.5973 -4.4744 4.5514 -4.4744 7.7509 v119.3133 c0 3.1995 1.708 6.1535 4.4744 7.7509 l102.4837 59.1683 c3.2909 1.9004 7.3515 1.9004 10.6424 0 l102.4837 -59.1683 c2.7664 -1.5973 4.4744 -4.5514 4.4744 -7.7509 v-119.3133 c0 -3.1995 -1.708 -6.1535 -4.4744 -7.7509 h-0.0048 Z M229.3651 73.1257 l-98.933 171.3563 c-0.6688 1.1547 -2.4345 0.6832 -2.4345 -0.6543 v-112.2024 c0 -2.242 -1.198 -4.3157 -3.1417 -5.4415 L27.6885 70.085 c-1.1547 -0.6688 -0.6832 -2.4345 0.6543 -2.4345 h197.8661 c2.8098 0 4.5658 3.0455 3.161 5.48 h-0.0048 Z";
+
+    // Source viewBox 1024x1024, uniformly scaled by 1/4 and centred vertically.
+    internal const string Grok =
+        "M98.8697 163.0284 L183.9775 99.8476 C188.1498 96.7501 194.1135 97.9584 196.1015 102.7694 C206.565 128.1426 201.8903 158.6346 181.072 179.5704 C160.254 200.5061 131.2877 205.0974 104.8118 194.6406 L75.889 208.1071 C117.3725 236.6219 167.7467 229.5701 199.2252 197.8919 C224.194 172.7821 231.927 138.5556 224.6962 107.6904 L224.7618 107.7561 C214.2763 62.4139 227.3395 44.2899 254.1 7.2295 C254.7325 6.3508 255.3675 5.4721 256 4.5714 L220.786 39.9841 V39.8744 L98.848 163.0504 Z M81.3065 178.3841 C51.532 149.7814 56.6655 105.5154 82.0713 79.9884 C100.8577 61.0956 131.6372 53.3849 158.5065 64.7204 L187.3635 51.3199 C182.1643 47.5414 175.5017 43.4771 167.856 40.6214 C133.2975 26.3199 91.9232 33.4376 63.8308 61.6669 C36.8085 88.8416 28.311 130.6251 42.9032 166.2796 C53.804 192.9271 35.9348 211.7759 17.9346 230.8004 C11.5559 237.5446 5.1554 244.2889 0 251.4286 L81.2848 178.4061 Z";
+
+    // Mirrors FluentAgentBar.ProviderIcons brand colours.
+    internal static readonly Color ClaudeBrandColor = Color.FromArgb(255, 217, 119, 87);
+    internal static readonly Color GeminiBrandColor = Color.FromArgb(255, 49, 134, 255);
+
+    // Mirrors FluentAgentBar.MockUsageData accent colours, used for the pill tint.
+    private static readonly Color CodexTintDark = Color.FromArgb(255, 96, 205, 255);
+    private static readonly Color CodexTintLight = Color.FromArgb(255, 0, 103, 192);
+    private static readonly Color GeminiTint = Color.FromArgb(255, 127, 168, 248);
+    private static readonly Color CursorTint = Color.FromArgb(255, 154, 163, 178);
+    private static readonly Color GrokTint = Color.FromArgb(255, 180, 180, 180);
+
+    // The widget receives the provider display name from the WinUI host.
+    internal static string Normalize(string? providerName)
+    {
+        string trimmed = providerName?.Trim() ?? string.Empty;
+        foreach (string known in new[] { "claude", "gemini", "cursor", "grok" })
+        {
+            if (string.Equals(trimmed, known, StringComparison.OrdinalIgnoreCase))
+            {
+                return known;
+            }
+        }
+
+        return "codex";
+    }
+
+    internal static string ForProvider(string? providerName)
+    {
+        return Normalize(providerName) switch
+        {
+            "claude" => Claude,
+            "gemini" => Gemini,
+            "cursor" => Cursor,
+            "grok" => Grok,
+            _ => OpenAi
+        };
+    }
+
+    // Claude and Gemini keep their brand colour; the OpenAI, Cursor and Grok
+    // marks are monochrome and follow the taskbar theme.
+    internal static Color? BrandColorFor(string? providerName)
+    {
+        return Normalize(providerName) switch
+        {
+            "claude" => ClaudeBrandColor,
+            "gemini" => GeminiBrandColor,
+            _ => null
+        };
+    }
+
+    internal static Color TintColorFor(string? providerName, bool dark)
+    {
+        return Normalize(providerName) switch
+        {
+            "claude" => ClaudeBrandColor,
+            "gemini" => GeminiTint,
+            "cursor" => CursorTint,
+            "grok" => GrokTint,
+            _ => dark ? CodexTintDark : CodexTintLight
+        };
+    }
 }

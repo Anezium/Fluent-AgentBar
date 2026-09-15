@@ -455,12 +455,9 @@ internal sealed class TaskbarWidgetWindow
         _primaryFill.Background = new SolidColorBrush(StatusColor(state.PrimaryRemainingPercent, state.IsDarkTaskbar));
         _weeklyFill.Background = new SolidColorBrush(StatusColor(state.WeeklyRemainingPercent, state.IsDarkTaskbar));
 
-        bool claude = IsClaude(state.ProviderName);
-        _logo.Data = Geometry.Parse(claude ? ProviderPathData.Claude : ProviderPathData.OpenAi);
+        _logo.Data = Geometry.Parse(ProviderPathData.ForProvider(state.ProviderName));
         _logo.Fill = new SolidColorBrush(
-            claude
-                ? Color.FromArgb(255, 217, 119, 87)
-                : primaryText);
+            ProviderPathData.BrandColorFor(state.ProviderName) ?? primaryText);
         _pill.Background = CreateTintBrush(state.ProviderName, state.IsDarkTaskbar, state.IsGlowEnabled);
     }
 
@@ -534,12 +531,7 @@ internal sealed class TaskbarWidgetWindow
             return Brushes.Transparent;
         }
 
-        bool claude = IsClaude(providerName);
-        Color brand = claude
-            ? Color.FromArgb(255, 217, 119, 87)
-            : dark
-                ? Color.FromArgb(255, 96, 205, 255)
-                : Color.FromArgb(255, 0, 103, 192);
+        Color brand = ProviderPathData.TintColorFor(providerName, dark);
         byte alpha = (byte)(dark ? 34 : 26);
         return new LinearGradientBrush(
             new GradientStopCollection
@@ -572,10 +564,6 @@ internal sealed class TaskbarWidgetWindow
             ? Color.FromArgb(255, 96, 205, 255)
             : Color.FromArgb(255, 0, 103, 192);
     }
-
-    private static bool IsClaude(string providerName) =>
-        providerName.Contains("claude", StringComparison.OrdinalIgnoreCase) ||
-        providerName.Contains("anthropic", StringComparison.OrdinalIgnoreCase);
 
     private void ShowContextMenu()
     {

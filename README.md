@@ -1,6 +1,6 @@
 # Fluent AgentBar
 
-WinUI 3 Windows taskbar presence inspired by CodexBar, scoped to Codex and Claude.
+WinUI 3 Windows taskbar presence inspired by CodexBar, covering Codex, Claude, Gemini CLI, Cursor and Grok.
 
 Active app: `winui\FluentAgentBar.csproj`. Active verification: `.\scripts\verify-winui.ps1`.
 The legacy C++ implementation in `src/` and `build.ps1` is kept only as a historical reference and should not be used for new WinUI validation.
@@ -18,8 +18,28 @@ This app provides:
 - One-click Codex account switching from the flyout or taskbar context menu, with Codex force-close and reopen flow.
 - Settings controls for startup, profile creation, rename, enable/disable, folder open, and refresh config.
 - Claude usage through configured Claude CLI credential directories.
+- Gemini CLI, Cursor and Grok usage through the credentials those tools already store on disk (see Supported providers).
 - Local token and USD cost summaries from Codex and Claude session logs.
 - Local config at `%APPDATA%\Fluent AgentBar\config.json`.
+
+## Supported providers
+
+Each profile names a provider and a home directory. Codex and Claude profiles get
+their own app-managed folder, so the same machine can hold several accounts side by
+side. Gemini, Cursor and Grok read the state of the installed tool instead, so their
+home is that tool's own directory and the profile name is only a label.
+
+| Provider | Credentials read from | Login action |
+| --- | --- | --- |
+| Codex | `CODEX_HOME`, by default `%APPDATA%\Fluent AgentBar\profiles\<profile>`; accounts and quotas come from `codex app-server` | `codex login` in a hidden console, which opens the browser flow |
+| Claude | `CLAUDE_CONFIG_DIR`, by default `%USERPROFILE%\.claude` for the first profile and `%APPDATA%\Fluent AgentBar\profiles\claude-<profile>` afterwards | `claude /login` in a visible console |
+| Gemini CLI | `%USERPROFILE%\.gemini`, written by the Gemini CLI on its first run | `gemini` in a visible console; the CLI prompts for sign-in when no credentials exist |
+| Cursor | `%APPDATA%\Cursor`, the session stored by the Cursor desktop app | opens <https://cursor.com/dashboard>; the actual sign-in happens inside the Cursor app |
+| Grok Build | `%USERPROFILE%\.grok`, written by the Grok CLI | `grok login` in a visible console; install the CLI from <https://x.ai/cli> (the published `install.sh` is macOS/Linux only) |
+
+Codex and Claude expose a short rolling window plus a weekly window. Claude also
+reports model-scoped weekly windows — a premium model such as Fable gets its own
+weekly quota — which the flyout shows as a separate group under the account.
 
 ## Screenshots
 
