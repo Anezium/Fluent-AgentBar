@@ -57,6 +57,7 @@ internal sealed class TokenStatsService
 
     // Sources to refresh from:
     // https://platform.claude.com/docs/en/about-claude/pricing
+    // https://developers.openai.com/api/docs/pricing (standard, short-context estimates)
     // https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
     private static readonly ModelPricing[] PricingTable =
     [
@@ -68,6 +69,7 @@ internal sealed class TokenStatsService
         new("claude-sonnet-5", 3.00, 15.00, 0.30, 3.75, EffectiveFrom: new DateTime(2026, 9, 1)),
         new("claude-sonnet-4", 3.00, 15.00, 0.30, 3.75),
         new("claude-haiku-4", 1.00, 5.00, 0.10, 1.25),
+        new("gpt-6-astra", 10.00, 50.00, 1.00, 12.50),
         new("gpt-5.6-terra", 2.50, 15.00, 0.25, 0),
         new("gpt-5-6-terra", 2.50, 15.00, 0.25, 0),
         new("gpt-5.6-luna", 1.00, 6.00, 0.10, 0),
@@ -244,39 +246,15 @@ internal sealed class TokenStatsService
             return;
         }
 
-        HashSet<string> files = new(StringComparer.OrdinalIgnoreCase);
-
-        // Sessions live in the folder of the day they started; their lines are
-        // bucketed by timestamp, so spanning midnight is handled per line.
-        for (DateTime day = minDay; day <= today; day = day.AddDays(1))
-        {
-            foreach (string filePath in EnumerateFiles(DayFolder(root, day), "*.jsonl", recurse: false))
-            {
-                files.Add(filePath);
-            }
-        }
-
-        foreach (string filePath in EnumerateFiles(root, "*.jsonl", recurse: false))
+        // Resumed sessions stay in their original date folder, even months
+        // later. Select by modification time, then bucket each event by date.
+        foreach (string filePath in EnumerateFiles(root, "*.jsonl", recurse: true))
         {
             if (WasModifiedSince(filePath, minDay))
             {
-                files.Add(filePath);
+                ReadCodexFileUsage(filePath, minDay, today, buckets);
             }
         }
-
-        foreach (string filePath in files)
-        {
-            ReadCodexFileUsage(filePath, minDay, today, buckets);
-        }
-    }
-
-    private static string DayFolder(string root, DateTime day)
-    {
-        return Path.Combine(
-            root,
-            day.Year.ToString("0000", CultureInfo.InvariantCulture),
-            day.Month.ToString("00", CultureInfo.InvariantCulture),
-            day.Day.ToString("00", CultureInfo.InvariantCulture));
     }
 
     // Cumulative counters are turned into per-line deltas and bucketed by the
@@ -294,7 +272,7 @@ internal sealed class TokenStatsService
 
         try
         {
-            foreach (string line in File.ReadLines(filePath))
+            foreach (string line in ReadSharedLines(filePath))
             {
                 if (string.IsNullOrWhiteSpace(line))
                 {
@@ -334,7 +312,7 @@ internal sealed class TokenStatsService
                 }
                 else if (inWindow)
                 {
-                    AddToBucket(buckets, day, usage);
+                    AddToBucket(buckets, day, usage with { CostUsd = CalculateCost(usage, currentModel, day) });
                 }
             }
         }
@@ -384,7 +362,7 @@ internal sealed class TokenStatsService
 
         try
         {
-            foreach (string line in File.ReadLines(filePath))
+            foreach (string line in ReadSharedLines(filePath))
             {
                 lineNumber++;
                 if (!TryReadClaudeLineUsage(
@@ -546,6 +524,18 @@ internal sealed class TokenStatsService
         catch (JsonException)
         {
             return false;
+        }
+    }
+
+    private static IEnumerable<string> ReadSharedLines(string filePath)
+    {
+        // Codex and Claude keep their journals open for writing. File.ReadLines
+        // uses FileShare.Read, which prevents opening those active logs on Windows.
+        using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using StreamReader reader = new(stream);
+        while (reader.ReadLine() is { } line)
+        {
+            yield return line;
         }
     }
 

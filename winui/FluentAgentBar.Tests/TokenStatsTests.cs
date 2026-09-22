@@ -111,6 +111,24 @@ public sealed class TokenStatsTests
         Assert.Equal(0, today.CostUsd);
     }
 
+    [Fact]
+    public async Task ComputeAsync_ReadsClaudeJournalWhileWriterIsOpen()
+    {
+        using TemporaryDirectory temp = new();
+        string jsonlPath = CreateClaudeJsonl(
+            temp.Path, "claude-opus-5", inputTokens: 1_000, outputTokens: 100,
+            cacheReadTokens: 200, cacheCreationTokens: 0);
+        using FileStream writer = new(jsonlPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+
+        (_, TokenReport? claude) = await new TokenStatsService().ComputeAsync(
+            CreateClaudeOnlyConfig(temp.Path), includeDefaultCodexHome: false);
+
+        TokenStats stats = Assert.IsType<TokenStats>(claude?.Today);
+        Assert.Equal(1_200, stats.TotalInputTokens);
+        Assert.Equal(100, stats.OutputTokens);
+        Assert.Equal(0.0076, stats.CostUsd, precision: 6);
+    }
+
     private static AppConfig CreateClaudeOnlyConfig(string claudeHome)
     {
         return new AppConfig

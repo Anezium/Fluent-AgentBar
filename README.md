@@ -22,6 +22,11 @@ This app provides:
 - Local token and USD cost summaries from Codex and Claude session logs.
 - Local config at `%APPDATA%\Fluent AgentBar\config.json`.
 
+Token statistics include active journals and older Codex sessions resumed within
+the last seven days. GPT-6 Astra costs use the published standard short-context
+API rates as an estimate; they do not represent subscription charges or include
+Fast mode and long-context premiums.
+
 ## Supported providers
 
 Each profile names a provider and a home directory. Codex and Claude profiles get
