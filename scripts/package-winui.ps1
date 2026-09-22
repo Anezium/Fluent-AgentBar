@@ -36,6 +36,13 @@ if (Test-Path $releaseBin) {
 }
 
 dotnet build $projectPath -c $configuration -p:Platform=$platform
+if ($LASTEXITCODE -ne 0) {
+    throw "WinUI release build failed with exit code $LASTEXITCODE"
+}
+
+if (Test-Path (Join-Path $releaseBin "FluentAgentBar.Tests")) {
+    throw "Release output unexpectedly includes nested test build artifacts"
+}
 
 foreach ($requiredFile in @("FluentAgentBar.exe", "FluentAgentBar.dll", "WpfTaskbarWidget.dll", "FluentAgentBar.pri", "App.xbf")) {
     $path = Join-Path $releaseBin $requiredFile

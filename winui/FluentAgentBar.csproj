@@ -18,6 +18,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefaultItemExcludes>$(DefaultItemExcludes);FluentAgentBar.Tests\**;WpfTaskbarWidget\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
