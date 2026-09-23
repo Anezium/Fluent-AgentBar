@@ -23,9 +23,29 @@ This app provides:
 - Local config at `%APPDATA%\Fluent AgentBar\config.json`.
 
 Token statistics include active journals and older Codex sessions resumed within
-the last seven days. GPT-6 Astra costs use the published standard short-context
-API rates as an estimate; they do not represent subscription charges or include
-Fast mode and long-context premiums.
+the last seven days. Costs use the published standard API rates as an estimate;
+they do not represent subscription charges or include Fast mode, 1-hour cache
+writes, or long-context premiums.
+
+Model prices update without an app release. Once a day AgentBar downloads
+[LiteLLM's public price list](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)
+and caches the Anthropic and OpenAI entries in
+`%APPDATA%\Fluent AgentBar\model-pricing-cache.json`. When offline, or for a
+model LiteLLM has not listed yet, a built-in table prices it by model family.
+If a model has no known price at all, its tokens are still counted and the cost
+reads as a minimum (`≥ $12.34`).
+
+To fix a price by hand, create `%APPDATA%\Fluent AgentBar\pricing-overrides.json`.
+Overrides beat every other source, match by model id prefix, and are reloaded
+when the file changes. Prices are USD per million tokens; omitted cache prices
+default to 0.1× (read) and 1.25× (write) the input price:
+
+```jsonc
+{
+  "claude-opus-5-5": { "input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 5 },
+  "gpt-6-nova": { "input": 3, "output": 15 }
+}
+```
 
 ## Supported providers
 
