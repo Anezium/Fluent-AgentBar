@@ -52,10 +52,17 @@ public sealed class TokenStatsTests
     [InlineData("claude-fable-5-20260609", "2026-07-04", 73.50)]
     [InlineData("claude-opus-5", "2026-07-24", 36.75)]
     [InlineData("claude-opus-5-20260724", "2026-07-24", 36.75)]
+    [InlineData("claude-fable-5-1", "2026-09-23", 72.75)]
+    [InlineData("claude-opus-5-5", "2026-09-23", 29.20)]
+    [InlineData("claude-opus-5-5-20260915", "2026-09-23", 29.20)]
+    [InlineData("claude-opus-4-1", "2026-07-04", 110.25)]
     [InlineData("claude-sonnet-5", "2026-07-04", 14.70)]
-    [InlineData("claude-sonnet-5", "2026-09-01", 22.05)]
-    [InlineData("claude-sonnet-5-20260630", "2026-09-01", 22.05)]
-    public async Task ComputeAsync_PricesCurrentClaudeModelsFromLineDate(
+    // The $3/$15 increase scheduled for 2026-09-01 was cancelled.
+    [InlineData("claude-sonnet-5", "2026-09-01", 14.70)]
+    [InlineData("claude-sonnet-5-20260630", "2026-09-01", 14.70)]
+    // Unlisted releases fall back to the newest known model of the family.
+    [InlineData("claude-opus-6", "2026-09-23", 29.20)]
+    public async Task ComputeAsync_PricesCurrentClaudeModels(
         string model,
         string usageDateText,
         double expectedCost)
@@ -109,6 +116,18 @@ public sealed class TokenStatsTests
         Assert.NotNull(claude?.Today);
         TokenStats today = claude.Today;
         Assert.Equal(0, today.CostUsd);
+        Assert.Equal(4_000_000, today.UnpricedTokens);
+        Assert.DoesNotContain("$", today.Summary);
+    }
+
+    [Fact]
+    public void ShortSummary_MarksCostAsFloorWhenSomeTokensAreUnpriced()
+    {
+        TokenStats priced = new(1_000, 100, 0, 0, CostUsd: 1.5);
+        TokenStats partlyUnpriced = priced with { UnpricedTokens = 500 };
+
+        Assert.EndsWith("\u00B7 $1.50", priced.ShortSummary);
+        Assert.EndsWith("\u00B7 \u2265 $1.50", partlyUnpriced.ShortSummary);
     }
 
     [Fact]

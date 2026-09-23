@@ -18,7 +18,8 @@ public sealed class UsageService : IDisposable
     private readonly GeminiUsageService _geminiUsageService = new();
     private readonly CursorUsageService _cursorUsageService = new();
     private readonly GrokUsageService _grokUsageService = new();
-    private readonly TokenStatsService _tokenStatsService = new();
+    private readonly ModelPricingCatalog _pricingCatalog;
+    private readonly TokenStatsService _tokenStatsService;
     private readonly Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> _fetchCodexProfileAsync;
     private readonly Func<ProfileConfig, CancellationToken, Task<ProfileUsage>> _fetchClaudeProfileAsync;
     private CancellationTokenSource? _loopCts;
@@ -34,6 +35,8 @@ public sealed class UsageService : IDisposable
     {
         _fetchCodexProfileAsync = FetchCodexProfileAsync;
         _fetchClaudeProfileAsync = FetchClaudeProfileAsync;
+        _pricingCatalog = ModelPricingCatalog.CreateDefault();
+        _tokenStatsService = new TokenStatsService(_pricingCatalog);
         AppConfigStore.Changed += OnConfigChanged;
     }
 
@@ -43,6 +46,8 @@ public sealed class UsageService : IDisposable
     {
         _fetchCodexProfileAsync = fetchCodexProfileAsync;
         _fetchClaudeProfileAsync = fetchClaudeProfileAsync;
+        _pricingCatalog = ModelPricingCatalog.BuiltIn;
+        _tokenStatsService = new TokenStatsService(_pricingCatalog);
         AppConfigStore.Changed += OnConfigChanged;
     }
 
@@ -1058,6 +1063,7 @@ public sealed class UsageService : IDisposable
         _geminiUsageService.Dispose();
         _cursorUsageService.Dispose();
         _grokUsageService.Dispose();
+        _pricingCatalog.Dispose();
         _fetchLock.Dispose();
         cts?.Dispose();
     }

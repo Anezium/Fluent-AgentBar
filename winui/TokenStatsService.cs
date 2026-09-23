@@ -9,7 +9,8 @@ public sealed record TokenStats(
     long OutputTokens,
     long CacheReadTokens,
     long CacheCreationTokens,
-    double CostUsd = 0)
+    double CostUsd = 0,
+    long UnpricedTokens = 0)
 {
     public long TotalInputTokens => InputTokens + CacheReadTokens + CacheCreationTokens;
 
@@ -20,9 +21,16 @@ public sealed record TokenStats(
         get
         {
             string summary = $"{FormatTokenCount(TotalInputTokens)} in \u00B7 {FormatTokenCount(OutputTokens)} out";
-            return CostUsd > 0
-                ? $"{summary} \u00B7 ${CostUsd.ToString("0.00", CultureInfo.InvariantCulture)}"
-                : summary;
+            if (CostUsd <= 0)
+            {
+                return summary;
+            }
+
+            // Tokens from a model with no known price make the cost a floor.
+            string cost = "$" + CostUsd.ToString("0.00", CultureInfo.InvariantCulture);
+            return UnpricedTokens > 0
+                ? $"{summary} \u00B7 \u2265 {cost}"
+                : $"{summary} \u00B7 {cost}";
         }
     }
 
@@ -55,51 +63,30 @@ internal sealed class TokenStatsService
 {
     private const int HistoryDays = 7;
 
-    // Sources to refresh from:
-    // https://platform.claude.com/docs/en/about-claude/pricing
-    // https://developers.openai.com/api/docs/pricing (standard, short-context estimates)
-    // https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
-    private static readonly ModelPricing[] PricingTable =
-    [
-        new("claude-fable-5", 10.00, 50.00, 1.00, 12.50),
-        new("claude-mythos-5", 10.00, 50.00, 1.00, 12.50),
-        new("claude-opus-5", 5.00, 25.00, 0.50, 6.25),
-        new("claude-opus-4", 5.00, 25.00, 0.50, 6.25),
-        new("claude-sonnet-5", 2.00, 10.00, 0.20, 2.50, EffectiveThrough: new DateTime(2026, 8, 31)),
-        new("claude-sonnet-5", 3.00, 15.00, 0.30, 3.75, EffectiveFrom: new DateTime(2026, 9, 1)),
-        new("claude-sonnet-4", 3.00, 15.00, 0.30, 3.75),
-        new("claude-haiku-4", 1.00, 5.00, 0.10, 1.25),
-        new("gpt-6-astra", 10.00, 50.00, 1.00, 12.50),
-        new("gpt-5.6-terra", 2.50, 15.00, 0.25, 0),
-        new("gpt-5-6-terra", 2.50, 15.00, 0.25, 0),
-        new("gpt-5.6-luna", 1.00, 6.00, 0.10, 0),
-        new("gpt-5-6-luna", 1.00, 6.00, 0.10, 0),
-        // Bare "gpt-5.6" (and -sol) default to the Sol tier.
-        new("gpt-5.6", 5.00, 30.00, 0.50, 0),
-        new("gpt-5-6", 5.00, 30.00, 0.50, 0),
-        new("gpt-5.5", 5.00, 30.00, 0.50, 0),
-        new("gpt-5-5", 5.00, 30.00, 0.50, 0),
-        new("gpt-5.4", 2.50, 15.00, 0.25, 0),
-        new("gpt-5-4", 2.50, 15.00, 0.25, 0),
-        new("gpt-5.3-codex", 1.75, 14.00, 0.175, 0),
-        new("gpt-5-3-codex", 1.75, 14.00, 0.175, 0),
-        new("gpt-5.1", 1.25, 10.00, 0.125, 0),
-        new("gpt-5-1", 1.25, 10.00, 0.125, 0),
-        new("gpt-5", 1.25, 10.00, 0.125, 0),
-        new("codex-mini", 1.50, 6.00, 0.375, 0)
-    ];
+    private readonly ModelPricingCatalog _pricing;
+
+    public TokenStatsService()
+        : this(ModelPricingCatalog.BuiltIn)
+    {
+    }
+
+    internal TokenStatsService(ModelPricingCatalog pricing)
+    {
+        _pricing = pricing;
+    }
 
     public Task<(TokenReport? codex, TokenReport? claude)> ComputeAsync(AppConfig config)
     {
         return ComputeAsync(config, includeDefaultCodexHome: true);
     }
 
-    internal Task<(TokenReport? codex, TokenReport? claude)> ComputeAsync(
+    internal async Task<(TokenReport? codex, TokenReport? claude)> ComputeAsync(
         AppConfig config,
         bool includeDefaultCodexHome,
         DateTime? today = null)
     {
-        return Task.Run(() =>
+        await _pricing.RefreshAsync();
+        return await Task.Run(() =>
         {
             TokenReport? codex = null;
             TokenReport? claude = null;
@@ -127,7 +114,7 @@ internal sealed class TokenStatsService
         });
     }
 
-    private static TokenReport? ComputeCodex(AppConfig config, bool includeDefaultCodexHome, DateTime today)
+    private TokenReport? ComputeCodex(AppConfig config, bool includeDefaultCodexHome, DateTime today)
     {
         DateTime minDay = today.AddDays(-(HistoryDays - 1));
         Dictionary<DateTime, TokenAccumulator> buckets = [];
@@ -157,7 +144,7 @@ internal sealed class TokenStatsService
         return ToReport(buckets, minDay, today);
     }
 
-    private static TokenReport? ComputeClaude(AppConfig config, DateTime today)
+    private TokenReport? ComputeClaude(AppConfig config, DateTime today)
     {
         DateTime minDay = today.AddDays(-(HistoryDays - 1));
         Dictionary<DateTime, TokenAccumulator> buckets = [];
@@ -235,7 +222,7 @@ internal sealed class TokenStatsService
         bucket.Add(stats);
     }
 
-    private static void ScanCodexSessionRoot(
+    private void ScanCodexSessionRoot(
         string root,
         DateTime minDay,
         DateTime today,
@@ -260,7 +247,7 @@ internal sealed class TokenStatsService
     // Cumulative counters are turned into per-line deltas and bucketed by the
     // line's timestamp, so each day only gets the tokens actually consumed
     // that day, even when a session spans midnight.
-    private static void ReadCodexFileUsage(
+    private void ReadCodexFileUsage(
         string filePath,
         DateTime minDay,
         DateTime today,
@@ -307,12 +294,12 @@ internal sealed class TokenStatsService
 
                     if (inWindow)
                     {
-                        AddToBucket(buckets, day, delta with { CostUsd = CalculateCost(delta, currentModel, day) });
+                        AddToBucket(buckets, day, Price(delta, currentModel));
                     }
                 }
                 else if (inWindow)
                 {
-                    AddToBucket(buckets, day, usage with { CostUsd = CalculateCost(usage, currentModel, day) });
+                    AddToBucket(buckets, day, Price(usage, currentModel));
                 }
             }
         }
@@ -351,7 +338,7 @@ internal sealed class TokenStatsService
         }
     }
 
-    private static void ReadClaudeFile(
+    private void ReadClaudeFile(
         string filePath,
         DateTime minDay,
         DateTime maxDay,
@@ -442,7 +429,7 @@ internal sealed class TokenStatsService
         return true;
     }
 
-    private static bool TryReadClaudeLineUsage(
+    private bool TryReadClaudeLineUsage(
         string line,
         string filePath,
         int lineNumber,
@@ -510,15 +497,7 @@ internal sealed class TokenStatsService
                 : filePath + "\u001F" + lineNumber.ToString(CultureInfo.InvariantCulture);
 
             string model = TryReadString(message, "model") ?? TryReadString(root, "model") ?? string.Empty;
-            double costUsd = CalculateCost(
-                inputTokens,
-                outputTokens,
-                cacheReadTokens,
-                cacheCreationTokens,
-                model,
-                day);
-
-            usage = new TokenStats(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd);
+            usage = Price(new TokenStats(inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens), model);
             return true;
         }
         catch (JsonException)
@@ -728,135 +707,19 @@ internal sealed class TokenStatsService
             Math.Max(0, current.CacheCreationTokens - previous.CacheCreationTokens));
     }
 
-    private static double CalculateCost(TokenStats usage, string? model, DateTime? usageDay = null)
+    private TokenStats Price(TokenStats usage, string? model)
     {
-        return CalculateCost(
-            usage.InputTokens,
-            usage.OutputTokens,
-            usage.CacheReadTokens,
-            usage.CacheCreationTokens,
-            model,
-            usageDay);
-    }
-
-    private static double CalculateCost(
-        long inputTokens,
-        long outputTokens,
-        long cacheReadTokens,
-        long cacheCreationTokens,
-        string? model,
-        DateTime? usageDay = null)
-    {
-        if (!TryGetPricing(model, usageDay ?? DateTime.Today, out ModelPricing? pricing))
+        if (!_pricing.TryGetPricing(model, out ModelPricing? pricing))
         {
-            return 0;
+            return usage with { CostUsd = 0, UnpricedTokens = usage.TotalInputTokens + usage.OutputTokens };
         }
 
         ModelPricing modelPricing = pricing!;
-        return ((inputTokens * modelPricing.Input) +
-                (outputTokens * modelPricing.Output) +
-                (cacheReadTokens * modelPricing.CacheRead) +
-                (cacheCreationTokens * modelPricing.CacheWrite)) / 1_000_000.0;
-    }
-
-    private static bool TryGetPricing(string? model, DateTime usageDay, out ModelPricing? pricing)
-    {
-        string normalizedModel = NormalizeModelName(model);
-        if (normalizedModel.Length == 0)
-        {
-            pricing = null;
-            return false;
-        }
-
-        foreach (ModelPricing candidate in PricingTable)
-        {
-            if (normalizedModel.StartsWith(candidate.Prefix, StringComparison.Ordinal) &&
-                candidate.AppliesOn(usageDay.Date))
-            {
-                pricing = candidate;
-                return true;
-            }
-        }
-
-        pricing = null;
-        return false;
-    }
-
-    private static string NormalizeModelName(string? model)
-    {
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            return string.Empty;
-        }
-
-        string normalized = model.Trim().ToLowerInvariant();
-        if (normalized.StartsWith("openai/", StringComparison.Ordinal))
-        {
-            normalized = normalized["openai/".Length..];
-        }
-
-        return StripDateSuffix(normalized);
-    }
-
-    private static string StripDateSuffix(string value)
-    {
-        if (value.Length > 11 && IsDashedDateSuffix(value.AsSpan(value.Length - 11, 11)))
-        {
-            return value[..^11];
-        }
-
-        if (value.Length > 9 && IsCompactDateSuffix(value.AsSpan(value.Length - 9, 9)))
-        {
-            return value[..^9];
-        }
-
-        return value;
-    }
-
-    private static bool IsDashedDateSuffix(ReadOnlySpan<char> value)
-    {
-        return value.Length == 11 &&
-            value[0] == '-' &&
-            char.IsDigit(value[1]) &&
-            char.IsDigit(value[2]) &&
-            char.IsDigit(value[3]) &&
-            char.IsDigit(value[4]) &&
-            value[5] == '-' &&
-            char.IsDigit(value[6]) &&
-            char.IsDigit(value[7]) &&
-            value[8] == '-' &&
-            char.IsDigit(value[9]) &&
-            char.IsDigit(value[10]);
-    }
-
-    private static bool IsCompactDateSuffix(ReadOnlySpan<char> value)
-    {
-        return value.Length == 9 &&
-            value[0] == '-' &&
-            char.IsDigit(value[1]) &&
-            char.IsDigit(value[2]) &&
-            char.IsDigit(value[3]) &&
-            char.IsDigit(value[4]) &&
-            char.IsDigit(value[5]) &&
-            char.IsDigit(value[6]) &&
-            char.IsDigit(value[7]) &&
-            char.IsDigit(value[8]);
-    }
-
-    private sealed record ModelPricing(
-        string Prefix,
-        double Input,
-        double Output,
-        double CacheRead,
-        double CacheWrite,
-        DateTime? EffectiveFrom = null,
-        DateTime? EffectiveThrough = null)
-    {
-        public bool AppliesOn(DateTime day)
-        {
-            return (EffectiveFrom is null || day >= EffectiveFrom.Value.Date) &&
-                (EffectiveThrough is null || day <= EffectiveThrough.Value.Date);
-        }
+        double costUsd = ((usage.InputTokens * modelPricing.Input) +
+                (usage.OutputTokens * modelPricing.Output) +
+                (usage.CacheReadTokens * modelPricing.CacheRead) +
+                (usage.CacheCreationTokens * modelPricing.CacheWrite)) / 1_000_000.0;
+        return usage with { CostUsd = costUsd, UnpricedTokens = 0 };
     }
 
     private sealed class TokenAccumulator
@@ -866,6 +729,7 @@ internal sealed class TokenStatsService
         private long _cacheReadTokens;
         private long _cacheCreationTokens;
         private double _costUsd;
+        private long _unpricedTokens;
 
         public bool HasValues { get; private set; }
 
@@ -877,11 +741,18 @@ internal sealed class TokenStatsService
             _cacheReadTokens += stats.CacheReadTokens;
             _cacheCreationTokens += stats.CacheCreationTokens;
             _costUsd += stats.CostUsd;
+            _unpricedTokens += stats.UnpricedTokens;
         }
 
         public TokenStats ToTokenStats()
         {
-            return new TokenStats(_inputTokens, _outputTokens, _cacheReadTokens, _cacheCreationTokens, _costUsd);
+            return new TokenStats(
+                _inputTokens,
+                _outputTokens,
+                _cacheReadTokens,
+                _cacheCreationTokens,
+                _costUsd,
+                _unpricedTokens);
         }
     }
 }

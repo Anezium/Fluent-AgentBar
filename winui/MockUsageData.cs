@@ -103,7 +103,9 @@ public sealed record ProviderUsage(
             return string.Empty;
         }
 
-        if (hasCost)
+        // A day spent only on unpriced models keeps its token volume instead
+        // of reading as free.
+        if (hasCost && (stats.CostUsd > 0 || stats.UnpricedTokens == 0))
         {
             double cost = stats.CostUsd;
             return cost < 10
@@ -147,7 +149,8 @@ public sealed record ProviderUsage(
                 History.Sum(day => day.Stats.OutputTokens),
                 History.Sum(day => day.Stats.CacheReadTokens),
                 History.Sum(day => day.Stats.CacheCreationTokens),
-                History.Sum(day => day.Stats.CostUsd));
+                History.Sum(day => day.Stats.CostUsd),
+                History.Sum(day => day.Stats.UnpricedTokens));
             return $"Last {History.Count} days · {total.ShortSummary}";
         }
     }
