@@ -168,3 +168,7 @@ the desktop app picks up the new account.
 - Codex profile login is implemented with app-server browser auth for the current local Codex CLI version.
 - Claude quota parsing is wired through local Claude OAuth credentials or `CLAUDE_CODE_OAUTH_TOKEN`.
 - Cookie import and OAuth repair flows are not ported yet.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
